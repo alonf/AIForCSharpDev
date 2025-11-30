@@ -1,14 +1,39 @@
 # ?? Joke Agents Demo - MAF Group Chat Workflow
 
-A demonstration of **MAF Group Chat Orchestration** for iterative agent collaboration with quality gates.
+A demonstration of **MAF Group Chat Orchestration** for iterative agent collaboration with quality gates, featuring **real-time streaming UI**.
 
 ## ? What This Demonstrates
 
 - **MAF Group Chat Workflow**: Using `AgentWorkflowBuilder` and `RoundRobinGroupChatManager`
+- **Real-Time Streaming**: Server-Sent Events (SSE) for live agent collaboration
 - **Custom Quality Gate**: `ShouldTerminateAsync()` for conditional workflow termination
 - **Iterative Refinement**: Agents collaborating through managed conversation turns
 - **Automatic Context Management**: Conversation history shared between agents
+- **Modern UI/UX**: ChatGPT-style streaming interface
 - **Agent Hosting**: A2A protocol with `MapA2A()` for distributed agents
+
+---
+
+## ?? **NEW: Real-Time Streaming Interface**
+
+Watch agents collaborate **live** with our new streaming interface!
+
+### **Two Viewing Modes**
+
+1. **?? Streaming View** (Recommended for demos!)
+   - **Real-time word-by-word** text streaming
+   - **Live agent indicators** - see who's thinking
+   - **Progress tracking** - watch iterations unfold
+   - **ChatGPT-style UX** - modern, engaging
+   - Perfect for **lectures and live demonstrations**
+
+2. **?? Classic View**
+   - Traditional all-at-once results
+   - Complete iteration history
+   - Comprehensive metrics
+   - API-based interface
+
+**Access**: http://localhost:5000 ? Choose your viewing mode!
 
 ---
 

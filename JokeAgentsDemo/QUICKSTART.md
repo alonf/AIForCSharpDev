@@ -65,25 +65,47 @@ You should see:
 
 ## Step 4: Use the Demo
 
-### Option A: Web UI
+### Option A: ?? Streaming Web UI (Recommended!)
 1. Open **http://localhost:5000** in browser
-2. Enter a topic (e.g., "programming")
-3. Click "Create Funny Joke"
-4. Watch MAF Group Chat workflow in action!
+2. Click **"Launch Streaming Demo"**
+3. Enter a topic (e.g., "programming")
+4. Watch agents collaborate **in real-time**!
+   - See text appear word-by-word
+   - Live agent indicators
+   - Progress tracking
+   - ChatGPT-style experience
 
-### Option B: API Call
+### Option B: ?? Classic Web UI
+1. Open **http://localhost:5000** in browser
+2. Click **"Launch Classic Demo"**
+3. Enter a topic
+4. Get complete results all at once
+
+### Option C: API Call
 ```bash
+# Streaming endpoint (SSE)
+curl -N "http://localhost:5000/api/jokes/stream?topic=cats"
+
+# Traditional endpoint
 curl -X POST "http://localhost:5000/api/jokes/create?topic=cats" \
   -H "Content-Type: application/json"
 ```
 
-### Option C: HTTP File
+### Option D: HTTP File
 Open `JokeAgentsDemo.http` in VS Code and click "Send Request"
 
 ---
 
 ## What You'll See
 
+### Streaming View ??
+1. **Real-time collaboration**: Watch text appear as agents type
+2. **Live status updates**: "JokeCreator is thinking..."
+3. **Progress tracking**: Iteration counter updates live
+4. **Instant feedback**: See ratings appear immediately
+5. **Modern UX**: ChatGPT-style interface
+
+### Classic View ??
 1. **Console Logs**: Real-time agent conversation turns
 2. **Group Chat Process**: Creator ? Critic ? Creator ? Critic...
 3. **Quality Gate**: Workflow terminates when rating ? 8
