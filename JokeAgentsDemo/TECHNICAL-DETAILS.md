@@ -1,0 +1,307 @@
+# ? Joke Agents Demo - Official Microsoft Agent Framework A2A Implementation
+
+## ?? NOW USING REAL MAF A2A APIs!
+
+This project demonstrates **proper Agent-to-Agent (A2A) Communication** using the **official Microsoft Agent Framework (MAF) APIs**.
+
+## What's Different Now?
+
+### ? Using Official MAF APIs
+
+**Before** (Manual Implementation):
+```csharp
+// ? Manual Agent Card creation
+app.MapGet("/agents/critic/.well-known/agent.json", () => { /* manual JSON */ });
+
+// ? Manual HTTP calls
+var httpClient = _httpClientFactory.CreateClient();
+var response = await httpClient.PostAsync(...);
+```
+
+**Now** (Official MAF APIs):
+```csharp
+// ? Official agent hosting with automatic Agent Card generation
+app.MapA2A(criticAgent, "/agents/critic");
+
+// ? Official A2A client for remote agent discovery
+var a2aClient = new A2AClient(new Uri("http://localhost:5000/agents/critic"));
+var remoteCriticAgent = a2aClient.GetAIAgent(
+    id: "joke-critic",
+    name: "JokeCritic",
+    description: "Remote joke evaluation agent",
+    displayName: "Joke Critic",
+    loggerFactory: loggerFactory);
+
+// ? Use remote agent like a local one
+var response = await remoteCriticAgent.RunAsync(prompt);
+```
+
+## ??? Architecture
+
+```
+???????????????????????????????????????????
+?         Web UI (Browser)                 ?
+???????????????????????????????????????????
+               ? HTTP POST
+               ?
+???????????????????????????????????????????
+?    /api/jokes/create                     ?
+?    (Orchestration Endpoint)              ?
+???????????????????????????????????????????
+               ?
+               ??? JokeCreator (Local Agent)
+               ?   • Creates/improves jokes
+               ?   • Uses IChatClient
+               ?
+               ?
+               ??? A2AClient
+                   ??? GetAIAgent()
+                       ??? Remote Critic Proxy
+                           ?
+                           ? HTTP (A2A Protocol)
+                   ?????????????????????????
+                   ?  /agents/critic        ?
+                   ?  (MapA2A endpoint)     ?
+                   ?  JokeCritic Agent      ?
+                   ?????????????????????????
+```
+
+## ?? Key Features
+
+### 1. Official Agent Hosting with `MapA2A()`
+
+```csharp
+// Create agents
+var criticAgent = chatClient.CreateAIAgent(
+    instructions: "You are a comedy critic...",
+    name: "JokeCritic");
+
+var creatorAgent = chatClient.CreateAIAgent(
+    instructions: "You are a comedian...",
+    name: "JokeCreator");
+
+// Host them with A2A protocol
+app.MapA2A(criticAgent, "/agents/critic");
+app.MapA2A(creatorAgent, "/agents/creator");
+```
+
+**What `MapA2A()` does:**
+- ? Creates HTTP endpoint for the agent
+- ? Automatically generates Agent Card at `/.well-known/agent.json`
+- ? Handles A2A protocol message routing
+- ? Manages agent state and threading
+- ? Provides built-in observability
+
+### 2. Remote Agent Discovery with `A2AClient`
+
+```csharp
+// Create A2A client pointing to remote agent
+var a2aClient = new A2AClient(new Uri("http://localhost:5000/agents/critic"));
+
+// Get AIAgent proxy for remote agent
+var remoteCriticAgent = a2aClient.GetAIAgent(
+    id: "joke-critic",
+    name: "JokeCritic",
+    description: "Remote joke evaluation agent",
+    displayName: "Joke Critic",
+    loggerFactory: loggerFactory);
+
+// Use it like any other AIAgent!
+var response = await remoteCriticAgent.RunAsync("Evaluate this joke...");
+```
+
+**What `A2AClient.GetAIAgent()` does:**
+- ? Discovers the remote agent (can fetch Agent Card)
+- ? Creates a local proxy that implements `AIAgent`
+- ? Transparently routes calls via HTTP
+- ? Handles serialization/deserialization
+- ? Manages errors and retries
+
+### 3. Iterative Workflow
+
+The orchestration endpoint demonstrates:
+- ? Creating jokes with local agent
+- ? Evaluating via remote agent (A2A)
+- ? Iterating until quality threshold met
+- ? Comprehensive logging
+
+## ?? How It Works
+
+### Step 1: Agent Creation
+```csharp
+var criticAgent = chatClient.CreateAIAgent(
+    instructions: "...",
+    name: "JokeCritic");
+```
+
+### Step 2: A2A Hosting
+```csharp
+app.MapA2A(criticAgent, "/agents/critic");
+```
+This creates:
+- `POST /agents/critic` - Agent invocation endpoint
+- `GET /agents/critic/.well-known/agent.json` - Agent Card (auto-generated)
+
+### Step 3: Remote Agent Access
+```csharp
+var a2aClient = new A2AClient(new Uri("http://localhost:5000/agents/critic"));
+var remoteCritic = a2aClient.GetAIAgent(...);
+```
+
+### Step 4: Remote Invocation
+```csharp
+// This call goes over HTTP using A2A protocol!
+var response = await remoteCritic.RunAsync(prompt);
+```
+
+## ?? Running the Demo
+
+### Prerequisites
+- .NET 10 SDK
+- Azure OpenAI access
+- Azure CLI authenticated (`az login`)
+
+### Quick Start
+
+```bash
+cd JokeAgentsDemo
+dotnet run
+```
+
+Open browser: http://localhost:5000
+
+### Testing A2A Protocol
+
+```bash
+# Get Agent Card (auto-generated by MapA2A)
+curl http://localhost:5000/agents/critic/.well-known/agent.json
+
+# Invoke agent via A2A protocol
+curl -X POST http://localhost:5000/agents/critic \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Evaluate: Why did the chicken cross the road?"}]}'
+
+# Full orchestration (Creator calls Critic via A2A)
+curl -X POST "http://localhost:5000/api/jokes/create?topic=programming"
+```
+
+## ?? NuGet Packages Used
+
+```xml
+<PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-preview.251125.1" />
+<PackageReference Include="Microsoft.Agents.AI.A2A" Version="1.0.0-preview.251125.1" />
+<PackageReference Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="1.0.0-preview.251125.1" />
+<PackageReference Include="Microsoft.Agents.AI.Workflows.Declarative" Version="1.0.0-preview.251125.1" />
+```
+
+## ?? Learning Points
+
+### 1. Agent Hosting is Automatic
+No need to manually create Agent Cards or routing - `MapA2A()` does it all!
+
+### 2. Remote Agents Look Local
+`A2AClient.GetAIAgent()` returns an `AIAgent` that works exactly like a local agent.
+
+### 3. Protocol is Transparent
+The A2A protocol details are handled by the framework - you just call `RunAsync()`.
+
+### 4. Observability is Built-In
+All A2A calls are logged through the MAF logging system.
+
+## ?? Comparison: Manual vs MAF
+
+| Feature | Manual Implementation | MAF Implementation |
+|---------|----------------------|-------------------|
+| Agent Card Creation | ? Manual JSON | ? Auto-generated |
+| HTTP Routing | ? Custom endpoints | ? MapA2A() |
+| Remote Discovery | ? Manual HTTP calls | ? A2AClient |
+| Protocol Compliance | ?? Best effort | ? Guaranteed |
+| Error Handling | ? Custom | ? Built-in |
+| Observability | ?? Custom logging | ? OpenTelemetry |
+| State Management | ? Manual | ? Automatic |
+| Threading | ? Manual | ? Managed |
+
+## ?? For Lecture Demonstrations
+
+### Demo Flow (15 minutes)
+
+**Minutes 0-3: Introduction**
+- Show the web UI
+- Explain the two agents
+
+**Minutes 3-5: Show Official APIs**
+- Open `Program.cs`
+- Point out `MapA2A()`
+- Point out `A2AClient.GetAIAgent()`
+- Explain this is the OFFICIAL MAF implementation
+
+**Minutes 5-10: Live Demo**
+- Create a joke about "programming"
+- Show console logs
+- Highlight A2A calls in the logs
+- Show Agent Card in browser
+
+**Minutes 10-12: Code Walkthrough**
+- Show how simple the code is
+- Compare to manual implementation
+- Explain framework benefits
+
+**Minutes 12-15: Q&A**
+- Production deployment
+- Distributed scenarios
+- Agent 365 observability
+
+## ?? Production Deployment
+
+### Deploy to Azure
+
+```bash
+# Deploy Critic Agent
+az webapp create --name joke-critic-prod \
+  --resource-group rg-agents \
+  --plan asp-agents
+
+# Deploy Creator Agent
+az webapp create --name joke-creator-prod \
+  --resource-group rg-agents \
+  --plan asp-agents
+```
+
+### Update A2AClient URL
+
+```csharp
+var a2aClient = new A2AClient(
+    new Uri("https://joke-critic-prod.azurewebsites.net/agents/critic"));
+```
+
+Now agents run on separate services!
+
+## ?? Documentation
+
+- [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/overview/agent-framework-overview)
+- [GitHub Repository](https://github.com/microsoft/agent-framework)
+- [Discord Community](https://discord.gg/b5zjErwbQM)
+- [Semantic Kernel Blog](https://devblogs.microsoft.com/semantic-kernel/)
+
+## ? Benefits of Official Implementation
+
+1. **? Protocol Compliance**: Guaranteed to follow A2A spec
+2. **? Future-Proof**: Updates automatically with framework
+3. **? Less Code**: No manual Agent Card or routing
+4. **? Better Errors**: Framework handles edge cases
+5. **? Observability**: Built-in OpenTelemetry support
+6. **? State Management**: Automatic threading and state
+7. **? Production Ready**: Designed for scale
+
+## ?? Summary
+
+This implementation now uses the **real Microsoft Agent Framework A2A APIs**:
+
+- ? `MapA2A()` for agent hosting
+- ? `A2AClient` for remote agent discovery
+- ? `GetAIAgent()` for creating agent proxies
+- ? Automatic Agent Card generation
+- ? Protocol-compliant A2A communication
+- ? Built-in observability and error handling
+
+**Perfect for teaching, learning, and building production A2A systems! ????**

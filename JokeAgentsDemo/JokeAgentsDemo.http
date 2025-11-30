@@ -1,0 +1,33 @@
+@JokeAgentsDemo_HostAddress = http://localhost:5046
+
+GET {{JokeAgentsDemo_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
+
+### Joke Agents Demo - API Testing with Microsoft Agent Framework A2A
+### Test the official MAF A2A protocol implementation
+
+### Health Check
+GET http://localhost:5000/health
+
+###
+
+### Create a Funny Joke (Full A2A Protocol - MAF)
+### This uses A2AClient to call remote agent
+POST http://localhost:5000/api/jokes/create?topic=programming
+Content-Type: application/json
+
+###
+
+### Create a Funny Joke about cats
+POST http://localhost:5000/api/jokes/create?topic=cats
+Content-Type: application/json
+
+###
+
+### Create a General Funny Joke (no topic)
+POST http://localhost:5000/api/jokes/create
+Content-Type: application/json
+
+###
