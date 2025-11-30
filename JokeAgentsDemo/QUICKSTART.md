@@ -1,6 +1,6 @@
 # ?? Quick Start - Joke Agents Demo
 
-Get the demo running in **under 5 minutes**.
+Get the **MAF Group Chat Workflow** demo running in **under 5 minutes**.
 
 ---
 
@@ -42,17 +42,18 @@ dotnet run
 You should see:
 ```
 ====================================================
-?? Joke Agents Demo - Microsoft Agent Framework A2A
+?? Joke Agents Demo - MAF Group Chat Workflow
 ====================================================
 
-? Using Official MAF A2A APIs:
-   • MapA2A() for agent hosting
-   • A2AClient for remote agent discovery
-   • GetAIAgent() for agent proxy creation
+? Using MAF Group Chat Orchestration:
+   • AgentWorkflowBuilder for workflow construction
+   • RoundRobinGroupChatManager for coordination
+   • Custom quality gate (ShouldTerminateAsync)
+   • Automatic conversation history management
 
 ?? Application: http://localhost:5000
 
-?? Agent Endpoints (A2A Protocol):
+?? Agent Endpoints:
    JokeCreator: http://localhost:5000/agents/creator
    JokeCritic:  http://localhost:5000/agents/critic
 
@@ -68,7 +69,7 @@ You should see:
 1. Open **http://localhost:5000** in browser
 2. Enter a topic (e.g., "programming")
 3. Click "Create Funny Joke"
-4. Watch agents collaborate!
+4. Watch MAF Group Chat workflow in action!
 
 ### Option B: API Call
 ```bash
@@ -83,9 +84,45 @@ Open `JokeAgentsDemo.http` in VS Code and click "Send Request"
 
 ## What You'll See
 
-1. **Console Logs**: Real-time A2A communication
-2. **Iteration Process**: JokeCreator ? A2AClient ? JokeCritic
-3. **Final Result**: Joke with rating 8+ and iteration history
+1. **Console Logs**: Real-time agent conversation turns
+2. **Group Chat Process**: Creator ? Critic ? Creator ? Critic...
+3. **Quality Gate**: Workflow terminates when rating ? 8
+4. **Final Result**: Joke with rating and iteration history
+
+---
+
+## Key Concepts
+
+### MAF Group Chat Workflow
+
+The demo uses **MAF Group Chat orchestration** with:
+
+```csharp
+// Custom manager with quality gate
+public class JokeQualityManager : RoundRobinGroupChatManager
+{
+    protected override ValueTask<bool> ShouldTerminateAsync(
+        IReadOnlyList<ChatMessage> history, ...)
+    {
+        // Terminate when critic approves (rating ? 8)
+        var lastMessage = history.LastOrDefault();
+        var rating = ExtractRating(lastMessage.Text);
+        return ValueTask.FromResult(rating >= 8);
+    }
+}
+
+// Build the workflow
+var workflow = AgentWorkflowBuilder
+    .CreateGroupChatBuilderWith(agents => new JokeQualityManager(agents, logger))
+    .AddParticipants(creatorAgent, criticAgent)
+    .Build();
+```
+
+**Key Features**:
+- ? Automatic turn-taking between agents
+- ? Shared conversation history
+- ? Custom termination logic (quality gate)
+- ? No manual context management needed
 
 ---
 
@@ -111,10 +148,10 @@ dotnet run --urls="http://localhost:5001"
 
 - ?? Read full [README.md](README.md)
 - ?? Try different topics
-- ?? Watch console logs to see A2A calls
+- ?? Watch console logs to see agent turns
 - ?? Inspect Agent Cards: http://localhost:5000/agents/critic/.well-known/agent.json
-- ?? Deploy to Azure (see README)
+- ?? Learn about [MAF Group Chat](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/orchestrations/group-chat)
 
 ---
 
-**That's it! You're running a real MAF A2A multi-agent system!** ??
+**That's it! You're running a MAF Group Chat workflow with quality gates!** ??

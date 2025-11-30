@@ -1,9 +1,10 @@
-using Azure.AI.OpenAI;
+﻿using Azure.AI.OpenAI;
 using Azure.Identity;
 using Microsoft.Extensions.AI;
 using Microsoft.Agents.AI;
-using Microsoft.AspNetCore.Builder;
-using A2A;
+using Microsoft.Agents.AI.Workflows;
+using JokeAgentsDemo;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -45,65 +46,11 @@ app.UseCors();
 // CREATE AGENTS
 // ============================================================================
 
-// Create JokeCritic Agent
-var criticAgent = chatClient.CreateAIAgent(
-    instructions: @"You are a professional comedy critic named JokeCritic.
-
-Your role is to evaluate jokes objectively and provide constructive feedback.
-
-Evaluation Criteria:
-1. **Humor (1-10)**: Is it funny? Does it have a good punchline?
-2. **Originality (1-10)**: Is it creative and fresh?
-3. **Wordplay (1-10)**: Does it use clever language?
-4. **Timing (1-10)**: Is the setup and delivery well-paced?
-5. **Deliverability (1-10)**: Is it easy to tell? Can it be performed naturally?
-6. **Structure (1-10)**: Is it a single, cohesive joke (not a list or multiple options)?
-
-Overall Rating: Average of all criteria (1-10 scale) - MUST BE AN INTEGER
-
-CRITICAL REQUIREMENTS for a joke to rate 8 or higher:
-- Must be a SINGLE joke, not multiple options or variations
-- Must be conversational and easy to deliver
-- Must flow naturally when spoken aloud
-- No list format (""here are some options"", ""pick from these"")
-- No meta-commentary about joke types
-- Should sound like something a comedian would actually say on stage
-
-When evaluating a joke:
-- If it's formatted as a list or multiple options: rate it 4 or lower
-- If it's not conversational/deliverable: rate it 6 or lower
-- If rating < 8: Provide specific, actionable feedback
-- If rating >= 8: Explain what makes it great
-- Always be constructive and encouraging
-
-CRITICAL: You MUST respond with ONLY valid JSON. No markdown code blocks, no extra text, just pure JSON.
-
-Response Format:
-{
-  ""rating"": 7,
-  ""feedback"": ""detailed constructive feedback here"",
-  ""isFunny"": false,
-  ""strengths"": [""strength 1"", ""strength 2""],
-  ""improvements"": [""improvement 1"", ""improvement 2""]
-}
-
-Rules:
-- rating MUST be an integer between 1 and 10
-- isFunny MUST be a boolean (true or false)
-- strengths and improvements MUST be arrays of strings
-- Do NOT wrap the JSON in markdown code blocks
-- Do NOT add any text before or after the JSON",
-    name: "JokeCritic");
-
-
-// Create JokeCreator Agent
-var creatorAgent = chatClient.CreateAIAgent(
+// Create JokeCreator Agent  
+ChatClientAgent creatorAgent = new(chatClient, new ChatClientAgentOptions(
     instructions: @"You are a creative comedian named JokeCreator.
 
-Your task is to:
-1. Create original, funny jokes when requested
-2. Improve jokes when given feedback from a critic
-3. Make substantial improvements that address specific feedback
+Your task is to create original, funny jokes and improve them based on feedback.
 
 CRITICAL REQUIREMENTS:
 - Create ONE single joke, not multiple options or variations
@@ -115,169 +62,230 @@ CRITICAL REQUIREMENTS:
 
 When creating jokes:
 - Be original and creative
-- Use different joke formats (one-liner, setup-punchline, observational humor)
 - Use wordplay, surprise, or relatable situations
 - Keep jokes appropriate and culturally sensitive
 - Aim for jokes that would rate 8 or higher on a 1-10 scale
 - Make sure the joke is DELIVERABLE - easy to tell and remember
 
 When improving jokes based on feedback:
-- Carefully read and understand the critique
+- Carefully read and understand the critique from previous messages
 - If the joke is formatted as a list, convert it to ONE single performable joke
 - If it's not conversational, rewrite it to flow naturally
 - Make substantial improvements addressing the feedback
-- Don't just make minor changes - really improve the joke
 - Try different approaches if the current format isn't working
-- Focus on the elements that need improvement (wordplay, timing, surprise, deliverability)
 
 RESPONSE FORMAT:
-Just return the joke text - clean, simple, ready to perform. Nothing else.",
-    name: "JokeCreator");
+Just return the joke text - clean, simple, ready to perform. Nothing else.")
+{
+    Name = "JokeCreator",
+    Description = "Creates and improves jokes based on feedback"
+});
 
+// Create JokeCritic Agent
+ChatClientAgent criticAgent = new(chatClient, new ChatClientAgentOptions(
+    instructions: @"You are a STRICT professional comedy critic named JokeCritic.
+
+Your role is to evaluate jokes with HIGH STANDARDS and provide tough but constructive feedback.
+
+CRITICAL QUALITY REQUIREMENTS for a joke to rate 8 or higher:
+- Must be SHORT: 2-4 sentences maximum
+- Must be TIGHT: Every word must earn its place
+- Must be PUNCHY: Get to the punchline FAST (within 10-15 seconds when spoken)
+- Must be MEMORABLE: Simple enough to retell immediately
+- Must be CONVERSATIONAL: Sound natural when spoken aloud
+- Must be a SINGLE cohesive joke (not rambling or multiple tangents)
+- Must have CLEAR setup and punchline structure
+- NO list formats or multiple options
+- NO meta-commentary about joke structure
+
+HARSH RATING CRITERIA:
+1. **Length**: If joke takes more than 20 seconds to tell → automatic 6 or lower
+2. **Clarity**: If punchline isn't obvious and immediate → 6 or lower  
+3. **Brevity**: If joke has unnecessary setup or padding → 5 or lower
+4. **Structure**: If joke rambles or has multiple tangents → 4 or lower
+5. **Punchiness**: If it takes too long to get to the funny part → 5 or lower
+
+Evaluation Criteria (1-10 scale):
+1. **Humor (1-10)**: Is it genuinely funny? Strong punchline?
+2. **Brevity (1-10)**: Is it SHORT and TIGHT? (2-4 sentences max)
+3. **Clarity (1-10)**: Is the punchline crystal clear and immediate?
+4. **Timing (1-10)**: Does it get to the funny part FAST?
+5. **Deliverability (1-10)**: Can someone retell it in 15 seconds?
+6. **Memorability (1-10)**: Is it simple enough to remember and share?
+
+Overall Rating: Average of all criteria (1-10 scale) - MUST BE AN INTEGER
+
+BE TOUGH:
+- Rate 8-10: RARE - Only for truly excellent, tight, punchy jokes
+- Rate 6-7: Decent joke but needs tightening or faster pacing
+- Rate 4-5: Too long, rambling, or unclear punchline
+- Rate 1-3: Not funny, confusing, or poorly structured
+
+When evaluating:
+- If joke is longer than 4 sentences: rate 6 or lower
+- If joke takes more than 15-20 seconds to tell: rate 5 or lower
+- If punchline isn't immediate and clear: rate 6 or lower
+- If joke has unnecessary padding: rate 5 or lower
+- Count the sentences - more than 4 is TOO MANY
+
+Response Format:
+Rating: [X/10]
+Sentence Count: [X sentences]
+Estimated Tell Time: [X seconds]
+Feedback: [Your TOUGH, specific feedback here]
+Strengths: [List strengths if any]
+Improvements: [List SPECIFIC improvements needed - be DEMANDING]
+
+CRITICAL RULE ABOUT APPROVAL:
+- Do NOT say 'APPROVED' or 'APPROVED' anywhere in your response if rating < 8
+- ONLY use the word 'APPROVED' if rating is 8, 9, or 10
+- If rating is 7 or lower: DO NOT APPROVE under any circumstances
+- The word 'APPROVED' should ONLY appear when joke truly deserves 8+ rating")
+{
+    Name = "JokeCritic",
+    Description = "Strict comedy critic who demands short, punchy, memorable jokes"
+});
 
 // ============================================================================
 // MAP AGENTS TO A2A ENDPOINTS
-// This uses the actual Microsoft Agent Framework A2A hosting
 // ============================================================================
 
 app.MapA2A(criticAgent, "/agents/critic");
 app.MapA2A(creatorAgent, "/agents/creator");
 
 // ============================================================================
-// ORCHESTRATION API
-// Demonstrates calling remote agent via A2A protocol
+// ORCHESTRATION API - Using MAF Group Chat Workflow
 // ============================================================================
 
 app.MapPost("/api/jokes/create", async (string? topic) =>
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
     
-    logger.LogInformation("=== Starting Joke Creation Process ===");
+    logger.LogInformation("=== Starting Joke Creation Process with MAF Group Chat ===");
     logger.LogInformation("Topic: {Topic}", topic ?? "general");
     
-    const int MaxIterations = 5;
-    const int MinAcceptableRating = 8;
-    var iterations = new List<object>();
-    string currentJoke = string.Empty;
-
-    // Create A2A client to call the Critic agent remotely
-    var criticEndpoint = "http://localhost:5000/agents/critic";
-    var a2aClient = new A2AClient(new Uri(criticEndpoint));
+    // Build the group chat workflow with quality gate
+    var workflow = AgentWorkflowBuilder
+        .CreateGroupChatBuilderWith(agents => 
+            new JokeQualityManager(agents, logger))
+        .AddParticipants(creatorAgent, criticAgent)
+        .Build();
     
-    // Get remote critic agent as a proxy
-    var remoteCriticAgent = a2aClient.GetAIAgent(
-        id: "joke-critic",
-        name: "JokeCritic",
-        description: "Remote joke evaluation agent",
-        displayName: "Joke Critic",
-        loggerFactory: app.Services.GetRequiredService<ILoggerFactory>());
-
-    for (int i = 0; i < MaxIterations; i++)
+    // Prepare initial prompt
+    var initialPrompt = string.IsNullOrWhiteSpace(topic)
+        ? "Create an original, funny joke."
+        : $"Create an original, funny joke about: {topic}";
+    
+    var messages = new List<ChatMessage> { new(ChatRole.User, initialPrompt) };
+    
+    // Execute the workflow
+    logger.LogInformation("Starting Group Chat workflow...");
+    
+    StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages);
+    await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
+    
+    var iterations = new List<object>();
+    var conversationHistory = new List<ChatMessage>();
+    string? finalJoke = null;
+    int? finalRating = null;
+    int iterationCount = 0;
+    
+    await foreach (WorkflowEvent evt in run.WatchStreamAsync().ConfigureAwait(false))
     {
-        logger.LogInformation("");
-        logger.LogInformation("--- Iteration {Iteration}/{MaxIterations} ---", i + 1, MaxIterations);
-
-        // Step 1: Create or improve joke using JokeCreator
-        if (i == 0)
+        if (evt is AgentRunUpdateEvent update)
         {
-            logger.LogInformation("JokeCreator: Creating initial joke...");
-            var prompt = string.IsNullOrWhiteSpace(topic)
-                ? "Create an original, funny joke."
-                : $"Create an original, funny joke about: {topic}";
-            var response = await creatorAgent.RunAsync(prompt);
-            currentJoke = response.Text;
-        }
-        else
-        {
-            var previousFeedback = iterations[i - 1];
-            logger.LogInformation("JokeCreator: Improving joke based on feedback...");
-            var prompt = $@"Here is a joke that needs improvement:
-""{currentJoke}""
-
-The critic's feedback:
-{System.Text.Json.JsonSerializer.Serialize(previousFeedback)}
-
-Please create an improved version that addresses this feedback.";
-            var response = await creatorAgent.RunAsync(prompt);
-            currentJoke = response.Text;
-        }
-
-        logger.LogInformation("Joke: \"{Joke}\"", currentJoke);
-
-        // Step 2: Evaluate using remote Critic via A2A protocol
-        logger.LogInformation("Calling JokeCritic via A2A protocol at {Endpoint}...", criticEndpoint);
-        var evalPrompt = $@"Please evaluate this joke:
-
-""{currentJoke}""
-
-IMPORTANT: Return ONLY valid JSON with this exact structure (no markdown, no extra text):
-{{
-  ""rating"": <integer 1-10>,
-  ""feedback"": ""<string>"",
-  ""isFunny"": <boolean>,
-  ""strengths"": [""<string>"", ...],
-  ""improvements"": [""<string>"", ...]
-}}";
-        
-        var evaluationResponse = await remoteCriticAgent.RunAsync(evalPrompt);
-        
-        logger.LogInformation("JokeCritic Response: {Response}", evaluationResponse.Text);
-
-        // Parse evaluation
-        var evaluation = ParseEvaluation(evaluationResponse.Text, logger);
-        
-        logger.LogInformation("Rating: {Rating}/10, IsFunny: {IsFunny}", evaluation.Rating, evaluation.IsFunny);
-
-        // Record iteration
-        iterations.Add(new
-        {
-            iteration = i + 1,
-            joke = currentJoke,
-            rating = evaluation.Rating,
-            feedback = evaluation.Feedback,
-            isFunny = evaluation.IsFunny,
-            strengths = evaluation.Strengths,
-            improvements = evaluation.Improvements,
-            timestamp = DateTime.UtcNow
-        });
-
-        // Check if we're done
-        if (evaluation.Rating >= MinAcceptableRating)
-        {
-            logger.LogInformation("");
-            logger.LogInformation("=== SUCCESS! Joke rated {Rating}/10 ===", evaluation.Rating);
-            
-            return Results.Ok(new
+            // Accumulate streaming updates - don't log every token
+            var response = update.AsResponse();
+            if (response.Messages.Any())
             {
-                success = true,
-                message = $"Created a funny joke in {i + 1} iteration(s)!",
-                finalJoke = currentJoke,
-                finalRating = evaluation.Rating,
-                totalIterations = i + 1,
-                iterations
-            });
+                var lastMessage = response.Messages.Last();
+                if (!string.IsNullOrEmpty(lastMessage.Text))
+                {
+                    // Only log when we have a complete message
+                    // The streaming is handled internally by the framework
+                }
+            }
+        }
+        else if (evt is WorkflowOutputEvent output)
+        {
+            conversationHistory = output.As<List<ChatMessage>>() ?? new List<ChatMessage>();
+            
+            // Extract iterations from conversation
+            // Skip the initial user message (first message)
+            for (int i = 1; i < conversationHistory.Count; i += 2)
+            {
+                if (i + 1 < conversationHistory.Count)
+                {
+                    var jokeMessage = conversationHistory[i];
+                    var evaluationMessage = conversationHistory[i + 1];
+                    
+                    // Only process if these are from the agents (not the user)
+                    if (jokeMessage.AuthorName != "user" && evaluationMessage.AuthorName != "user")
+                    {
+                        var joke = jokeMessage.Text ?? "";
+                        var evaluation = evaluationMessage.Text ?? "";
+                        var rating = JokeQualityManager.ExtractRating(evaluation);
+                        var sentenceCount = JokeQualityManager.ExtractSentenceCount(evaluation);
+                        var tellTime = JokeQualityManager.ExtractTellTime(evaluation);
+                        
+                        iterationCount++;
+                        
+                        // Log complete turn
+                        logger.LogInformation("");
+                        logger.LogInformation("--- Turn {Turn} ---", iterationCount);
+                        logger.LogInformation("[{Agent}]: {Joke}", jokeMessage.AuthorName ?? "Unknown", joke.Length > 150 ? joke.Substring(0, 150) + "..." : joke);
+                        logger.LogInformation("[{Agent}]: Rating {Rating}/10 | Sentences: {Sentences} | Tell Time: {Time}s", 
+                            evaluationMessage.AuthorName ?? "Unknown", rating, sentenceCount > 0 ? sentenceCount.ToString() : "?", tellTime > 0 ? tellTime.ToString() : "?");
+                        
+                        iterations.Add(new
+                        {
+                            iteration = iterationCount,
+                            joke,
+                            rating,
+                            sentenceCount,
+                            tellTime,
+                            feedback = evaluation,
+                            isFunny = rating >= 8,
+                            timestamp = DateTime.UtcNow
+                        });
+                        
+                        finalJoke = joke;
+                        finalRating = rating;
+                    }
+                }
+            }
+            
+            break;
         }
     }
-
-    // Max iterations reached
-    logger.LogWarning("Maximum iterations reached");
-    var lastIteration = iterations.Last();
-    var lastRating = ((dynamic)lastIteration).rating;
+    
+    var success = (finalRating ?? 0) >= 8;
+    
+    logger.LogInformation("");
+    if (success)
+    {
+        logger.LogInformation("=== SUCCESS! Joke rated {Rating}/10 ===", finalRating);
+    }
+    else
+    {
+        logger.LogWarning("=== Maximum iterations reached. Best rating: {Rating}/10 ===", finalRating ?? 0);
+    }
     
     return Results.Ok(new
     {
-        success = false,
-        message = $"Reached max iterations. Best rating: {lastRating}/10",
-        finalJoke = currentJoke,
-        finalRating = lastRating,
-        totalIterations = MaxIterations,
+        success,
+        message = success 
+            ? $"Created a funny joke in {iterationCount} iteration(s)!" 
+            : $"Reached max iterations. Best rating: {finalRating ?? 0}/10",
+        finalJoke = finalJoke ?? "",
+        finalRating = finalRating ?? 0,
+        totalIterations = iterationCount,
         iterations
     });
 }).WithName("CreateFunnyJoke");
 
 // ============================================================================
 // WEB UI
-// Simple interface to interact with the agents
 // ============================================================================
 
 app.MapGet("/", () => Results.Content("""
@@ -287,7 +295,7 @@ app.MapGet("/", () => Results.Content("""
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Joke Agents Demo - A2A Protocol (MAF)</title>
+    <title>Joke Agents Demo - MAF Group Chat Workflow</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -442,25 +450,25 @@ app.MapGet("/", () => Results.Content("""
     <div class="container">
         <div class="header">
             <h1><span class="emoji-icon">&#127917;</span>Joke Agents Demo</h1>
-            <p class="subtitle">Agent-to-Agent (A2A) Communication with Microsoft Agent Framework</p>
-            <span class="badge-maf">&#10004; Using Official MAF A2A APIs</span>
+            <p class="subtitle">MAF Group Chat Workflow with Quality Gate</p>
+            <span class="badge-maf">&#10004; Using MAF Workflows</span>
         </div>
 
         <div class="content">
             <div class="panel full-width">
                 <h2>Create a Funny Joke</h2>
-                <p>Watch two AI agents collaborate using <strong>real A2A protocol</strong> to create the perfect joke!</p>
+                <p>Watch two AI agents collaborate using <strong>MAF Group Chat workflow</strong> to create the perfect joke!</p>
                 <div class="feature-list">
                     <strong>&#127919; Using Microsoft Agent Framework:</strong>
                     <ul>
-                        <li><code>MapA2A()</code> - Official agent hosting</li>
-                        <li><code>A2AClient</code> - Remote agent discovery</li>
-                        <li><code>GetAIAgent()</code> - Agent proxy creation</li>
-                        <li>Automatic Agent Card generation</li>
+                        <li><code>GroupChatBuilder</code> - Workflow orchestration</li>
+                        <li><code>RoundRobinGroupChatManager</code> - Agent coordination</li>
+                        <li><code>ShouldTerminateAsync()</code> - Custom quality gate</li>
+                        <li>Automatic conversation history management</li>
                     </ul>
                 </div>
                 <input type="text" id="topic" placeholder="Enter a topic (optional, e.g., 'programming', 'cats')">
-                <button onclick="createJoke()" id="createBtn">&#127914; Create Funny Joke (Real A2A Demo)</button>
+                <button onclick="createJoke()" id="createBtn">&#127914; Create Funny Joke (MAF Workflow)</button>
                 <div id="result" class="result"></div>
             </div>
 
@@ -469,7 +477,7 @@ app.MapGet("/", () => Results.Content("""
                 <p>Creates and improves jokes</p>
                 <div class="endpoint">
                     <div><strong>Endpoint:</strong> /agents/creator</div>
-                    <div><strong>Hosted with:</strong> <code>MapA2A()</code></div>
+                    <div><strong>Pattern:</strong> Group Chat Participant</div>
                 </div>
             </div>
 
@@ -478,20 +486,19 @@ app.MapGet("/", () => Results.Content("""
                 <p>Evaluates jokes and provides feedback</p>
                 <div class="endpoint">
                     <div><strong>Endpoint:</strong> /agents/critic</div>
-                    <div><strong>Called via:</strong> <code>A2AClient</code></div>
+                    <div><strong>Pattern:</strong> Group Chat Participant</div>
                 </div>
             </div>
         </div>
 
         <div class="panel">
-            <h2>&#128200; How Real A2A Protocol Works (MAF)</h2>
+            <h2>&#128200; How MAF Group Chat Works</h2>
             <ol style="line-height:1.8; color:#666; margin-left:20px">
-                <li><strong>Agent Hosting:</strong> Agents mapped using <code>app.MapA2A(agent, "/path")</code></li>
-                <li><strong>Agent Discovery:</strong> <code>A2AClient</code> creates connection to remote agent</li>
-                <li><strong>Agent Proxy:</strong> <code>GetAIAgent()</code> creates local proxy for remote agent</li>
-                <li><strong>Communication:</strong> Proxy calls remote agent via HTTP (A2A protocol)</li>
-                <li><strong>Agent Cards:</strong> Automatically generated by MapA2A</li>
-                <li><strong>Observability:</strong> All interactions logged via MAF logging</li>
+                <li><strong>Group Chat Manager:</strong> Coordinates agent turns using <code>RoundRobinGroupChatManager</code></li>
+                <li><strong>Iterative Refinement:</strong> Agents take turns, each seeing full conversation history</li>
+                <li><strong>Quality Gate:</strong> <code>ShouldTerminateAsync()</code> checks rating and terminates when ≥8</li>
+                <li><strong>Automatic Context:</strong> Conversation history automatically shared between agents</li>
+                <li><strong>Managed Iteration:</strong> Framework handles turn-taking and history</li>
             </ol>
         </div>
     </div>
@@ -503,9 +510,9 @@ app.MapGet("/", () => Results.Content("""
             const result = document.getElementById('result');
             
             btn.disabled = true;
-            btn.innerHTML = '&#128260; Creating joke...'; // Use innerHTML instead of textContent
+            btn.innerHTML = '&#128260; Creating joke...';
             result.style.display = 'block';
-            result.innerHTML = '<div class="loading">&#129302; JokeCreator and JokeCritic are working together via A2A protocol...<br>Using official Microsoft Agent Framework APIs!<br>Check the console for detailed logs!</div>';
+            result.innerHTML = '<div class="loading">&#129302; JokeCreator and JokeCritic are collaborating via MAF Group Chat workflow...<br>Check the console for detailed logs!</div>';
             
             try {
                 const response = await fetch(`/api/jokes/create?topic=${encodeURIComponent(topic || '')}`, {
@@ -526,7 +533,7 @@ app.MapGet("/", () => Results.Content("""
                     <p>${data.message}</p>
                     <div class="joke-text">"${data.finalJoke}"</div>
                     <p><span class="rating">${data.finalRating}/10</span> ${data.finalRating >= 8 ? '&#127881;' : '&#128522;'}</p>
-                    <h3 style="margin-top:20px">Iteration History (A2A Calls via A2AClient):</h3>
+                    <h3 style="margin-top:20px">Iteration History (Group Chat Turns):</h3>
                 `;
                 
                 data.iterations.forEach(iter => {
@@ -539,8 +546,6 @@ app.MapGet("/", () => Results.Content("""
                             </div>
                             <div style="margin-top:10px"><strong>Joke:</strong> "${iter.joke}"</div>
                             <div style="margin-top:5px;color:#666"><strong>Feedback:</strong> ${iter.feedback}</div>
-                            ${iter.strengths?.length ? `<div style="margin-top:5px;color:#28a745"><strong>&#10003; Strengths:</strong> ${iter.strengths.join(', ')}</div>` : ''}
-                            ${iter.improvements?.length ? `<div style="margin-top:5px;color:#ffc107"><strong>&#8594; Improvements:</strong> ${iter.improvements.join(', ')}</div>` : ''}
                         </div>
                     `;
                 });
@@ -551,7 +556,7 @@ app.MapGet("/", () => Results.Content("""
                 console.error('Error creating joke:', error);
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = '&#127914; Create Another Joke'; // Use innerHTML
+                btn.innerHTML = '&#127914; Create Another Joke';
             }
         }
     </script>
@@ -565,7 +570,7 @@ app.MapGet("/health", () => Results.Ok(new
     status = "healthy",
     timestamp = DateTime.UtcNow,
     framework = "Microsoft Agent Framework (MAF)",
-    a2aProtocol = "Official Implementation",
+    pattern = "Group Chat Orchestration",
     agents = new
     {
         creator = "http://localhost:5000/agents/creator",
@@ -574,73 +579,32 @@ app.MapGet("/health", () => Results.Ok(new
 })).WithName("Health");
 
 Console.WriteLine("====================================================");
-Console.WriteLine("?? Joke Agents Demo - Microsoft Agent Framework A2A");
+Console.WriteLine("🎭 Joke Agents Demo - MAF Group Chat Workflow");
 Console.WriteLine("====================================================");
 Console.WriteLine();
-Console.WriteLine("? Using Official MAF A2A APIs:");
-Console.WriteLine("   � MapA2A() for agent hosting");
-Console.WriteLine("   � A2AClient for remote agent discovery");
-Console.WriteLine("   � GetAIAgent() for agent proxy creation");
+Console.WriteLine("✅ Using MAF Group Chat Orchestration:");
+Console.WriteLine("   • AgentWorkflowBuilder for workflow construction");
+Console.WriteLine("   • RoundRobinGroupChatManager for coordination");
+Console.WriteLine("   • Custom quality gate (ShouldTerminateAsync)");
+Console.WriteLine("   • Automatic conversation history management");
 Console.WriteLine();
-Console.WriteLine("?? Application: http://localhost:5000");
+Console.WriteLine("📍 Application: http://localhost:5000");
 Console.WriteLine();
-Console.WriteLine("?? Agent Endpoints (A2A Protocol):");
+Console.WriteLine("🤖 Agent Endpoints:");
 Console.WriteLine("   JokeCreator: http://localhost:5000/agents/creator");
 Console.WriteLine("   JokeCritic:  http://localhost:5000/agents/critic");
 Console.WriteLine();
-Console.WriteLine("?? Open http://localhost:5000 in your browser!");
+Console.WriteLine("💡 Open http://localhost:5000 in your browser!");
 Console.WriteLine("====================================================");
 Console.WriteLine();
 
 app.Run("http://localhost:5000");
 
-// Helper function to parse evaluation
-static JokeEvaluation ParseEvaluation(string evaluationText, ILogger logger)
-{
-    try
-    {
-        // Try to extract JSON from the response
-        var jsonStart = evaluationText.IndexOf('{');
-        var jsonEnd = evaluationText.LastIndexOf('}');
-        
-        if (jsonStart >= 0 && jsonEnd > jsonStart)
-        {
-            var jsonText = evaluationText.Substring(jsonStart, jsonEnd - jsonStart + 1);
-            var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var evaluation = System.Text.Json.JsonSerializer.Deserialize<JokeEvaluation>(jsonText, options);
-            
-            if (evaluation != null)
-            {
-                return evaluation with { IsFunny = evaluation.Rating >= 8 };
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "Failed to parse evaluation JSON");
-    }
 
-    // Fallback
-    var ratingMatch = System.Text.RegularExpressions.Regex.Match(
-        evaluationText, 
-        @"rating[\""\s:]*(\d+)", 
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    
-    var rating = ratingMatch.Success && int.TryParse(ratingMatch.Groups[1].Value, out int r) ? r : 5;
-    
-    return new JokeEvaluation(
-        Rating: rating,
-        Feedback: evaluationText,
-        IsFunny: rating >= 8,
-        Strengths: Array.Empty<string>(),
-        Improvements: Array.Empty<string>()
-    );
-}
 
-record JokeEvaluation(
-    int Rating,
-    string Feedback,
-    bool IsFunny,
-    string[] Strengths,
-    string[] Improvements
-);
+
+
+
+
+
+

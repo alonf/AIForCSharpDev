@@ -1,14 +1,14 @@
-# ?? Joke Agents Demo - Microsoft Agent Framework A2A
+# ?? Joke Agents Demo - MAF Group Chat Workflow
 
-A demonstration of **Agent-to-Agent (A2A) Communication** using the official **Microsoft Agent Framework (MAF)** APIs.
+A demonstration of **MAF Group Chat Orchestration** for iterative agent collaboration with quality gates.
 
 ## ? What This Demonstrates
 
-- **Official MAF A2A Protocol**: Using `MapA2A()`, `A2AClient`, and `GetAIAgent()` APIs
-- **Multi-Agent Collaboration**: Two AI agents working together iteratively
-- **Agent Hosting**: Automatic Agent Card generation and endpoint creation
-- **Remote Agent Discovery**: A2AClient discovering and calling remote agents
-- **Iterative Refinement**: Agents improving output through feedback loops
+- **MAF Group Chat Workflow**: Using `AgentWorkflowBuilder` and `RoundRobinGroupChatManager`
+- **Custom Quality Gate**: `ShouldTerminateAsync()` for conditional workflow termination
+- **Iterative Refinement**: Agents collaborating through managed conversation turns
+- **Automatic Context Management**: Conversation history shared between agents
+- **Agent Hosting**: A2A protocol with `MapA2A()` for distributed agents
 
 ---
 
@@ -22,31 +22,87 @@ A demonstration of **Agent-to-Agent (A2A) Communication** using the official **M
            ? POST /api/jokes/create
            ?
 ???????????????????????????????
-?  Orchestration Endpoint     ?
-?  • Manages iteration loop   ?
-?  • Coordinates agents       ?
+?   MAF Group Chat Workflow   ?
+?   • AgentWorkflowBuilder    ?
+?   • JokeQualityManager      ?
+?   • ShouldTerminateAsync()  ?
 ???????????????????????????????
        ?              ?
-       ? Local        ? A2A Protocol (HTTP)
        ?              ?
-???????????????  ????????????????????
-?JokeCreator  ?  ?   A2AClient      ?
-?(Local)      ?  ?   • Discovery    ?
-?• Creates    ?  ?   • Proxy        ?
-?• Improves   ?  ????????????????????
-???????????????       ? HTTP POST
-                      ?
-              ??????????????????????
-              ? /agents/critic     ?
-              ? (MapA2A Endpoint)  ?
-              ? ?????????????????? ?
-              ? ?  JokeCritic    ? ?
-              ? ?  • Evaluates   ? ?
-              ? ?  • Rates 1-10  ? ?
-              ? ?  • Provides    ? ?
-              ? ?    Feedback    ? ?
-              ? ?????????????????? ?
-              ??????????????????????
+?????????????????? ??????????????????
+? JokeCreator    ? ?  JokeCritic    ?
+? (Participant)  ? ?  (Participant) ?
+? • Creates      ? ?  • Evaluates   ?
+? • Improves     ? ?  • Rates 1-10  ?
+?????????????????? ??????????????????
+       ?              ?
+       ????????????????
+              ?
+    Shared Conversation History
+    (Automatic Context Management)
+```
+
+---
+
+## ?? MAF Group Chat Orchestration
+
+### The Pattern
+
+MAF Group Chat orchestration provides **managed iteration** with:
+- ? **Turn-based conversation** between agents
+- ? **Shared conversation history** (automatic context)
+- ? **Custom termination logic** via `ShouldTerminateAsync()`
+- ? **Centralized coordination** through manager
+- ? **Quality gates** for conditional workflow termination
+
+### Custom Quality Gate Manager
+
+```csharp
+public class JokeQualityManager : RoundRobinGroupChatManager
+{
+    public JokeQualityManager(IReadOnlyList<AIAgent> agents, ILogger logger) 
+        : base(agents)
+    {
+        MaximumIterationCount = 5;  // Safety limit
+    }
+
+    protected override ValueTask<bool> ShouldTerminateAsync(
+        IReadOnlyList<ChatMessage> history, 
+        CancellationToken cancellationToken = default)
+    {
+        var lastMessage = history.LastOrDefault();
+        
+        // Check if critic approved the joke (rating ? 8)
+        if (lastMessage?.AuthorName == "JokeCritic")
+        {
+            if (messageText.Contains("APPROVED"))
+                return ValueTask.FromResult(true);  // ? Quality gate!
+                
+            var rating = ExtractRating(messageText);
+            return ValueTask.FromResult(rating >= 8);
+        }
+        
+        return ValueTask.FromResult(false);
+    }
+}
+```
+
+### Building the Workflow
+
+```csharp
+var workflow = AgentWorkflowBuilder
+    .CreateGroupChatBuilderWith(agents => 
+        new JokeQualityManager(agents, logger))
+    .AddParticipants(creatorAgent, criticAgent)
+    .Build();
+
+// Execute the workflow
+var messages = new List<ChatMessage> { 
+    new(ChatRole.User, "Create a funny joke about programming") 
+};
+
+StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages);
+await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 ```
 
 ---
@@ -71,47 +127,42 @@ Open browser: **http://localhost:5000**
 
 ## ?? Key Features
 
-### 1. **Official MAF A2A APIs**
+### 1. **MAF Group Chat Workflow**
 
 ```csharp
-// ? Agent hosting with automatic Agent Card
-app.MapA2A(criticAgent, "/agents/critic");
-
-// ? Remote agent discovery
-var a2aClient = new A2AClient(new Uri("http://localhost:5000/agents/critic"));
-
-// ? Agent proxy creation
-var remoteCritic = a2aClient.GetAIAgent(
-    id: "joke-critic",
-    name: "JokeCritic",
-    description: "Remote joke evaluation agent",
-    displayName: "Joke Critic",
-    loggerFactory: loggerFactory);
-
-// ? Transparent remote invocation
-var response = await remoteCritic.RunAsync(prompt);
+// Build workflow with custom manager
+var workflow = AgentWorkflowBuilder
+    .CreateGroupChatBuilderWith(agents => 
+        new JokeQualityManager(agents, logger))
+    .AddParticipants(creatorAgent, criticAgent)
+    .Build();
 ```
+
+**Benefits**:
+- ? Automatic conversation management
+- ? Shared context between agents
+- ? Declarative workflow definition
+- ? Built-in iteration control
 
 ### 2. **Two Specialized Agents**
 
 **JokeCreator Agent** ??
 - Creates original, funny jokes
-- Improves jokes based on feedback
-- Focuses on deliverability and performance
+- Improves jokes based on conversation history
+- Sees critic's feedback automatically
 
 **JokeCritic Agent** ??
 - Evaluates jokes on 6 criteria
 - Provides detailed constructive feedback
-- Rates jokes from 1-10
-- Ensures jokes are single, performable, and conversational
+- Signals termination with "APPROVED" or rating ? 8
 
-### 3. **Iterative Refinement**
+### 3. **Automatic Iteration**
 
-The orchestrator runs up to 5 iterations:
-1. JokeCreator creates initial joke
-2. JokeCritic evaluates via A2A protocol
-3. If rating < 8: JokeCreator improves based on feedback
-4. Repeat until rating ? 8 or max iterations
+The Group Chat Manager:
+1. Starts with initial user message
+2. Alternates between Creator and Critic (round-robin)
+3. Checks termination condition after each Critic response
+4. Continues until rating ? 8 or max iterations reached
 
 ---
 
@@ -133,159 +184,130 @@ The orchestrator runs up to 5 iterations:
 ### Agent Endpoints (Auto-generated by MapA2A)
 
 - `POST /agents/critic` - JokeCritic invocation
-- `GET /agents/critic/.well-known/agent.json` - JokeCritic Agent Card
+- `GET /agents/critic/.well-known/agent.json` - Agent Card
 - `POST /agents/creator` - JokeCreator invocation  
-- `GET /agents/creator/.well-known/agent.json` - JokeCreator Agent Card
+- `GET /agents/creator/.well-known/agent.json` - Agent Card
 
 ### Application Endpoints
 
 - `GET /` - Web UI
-- `POST /api/jokes/create?topic={topic}` - Create funny joke with A2A orchestration
+- `POST /api/jokes/create?topic={topic}` - Create joke with Group Chat workflow
 - `GET /health` - Health check
 
 ---
 
-## ?? How A2A Protocol Works
+## ?? How Group Chat Works
 
-### Step 1: Agent Hosting
-```csharp
-app.MapA2A(criticAgent, "/agents/critic");
-```
-- Creates HTTP endpoint
-- Generates Agent Card automatically
-- Handles A2A protocol messages
-- Manages agent state
+### Workflow Execution Flow
 
-### Step 2: Remote Discovery
-```csharp
-var a2aClient = new A2AClient(new Uri("http://localhost:5000/agents/critic"));
-var remoteAgent = a2aClient.GetAIAgent(...);
 ```
-- Connects to remote agent
-- Creates local proxy
-- Handles serialization
+User Request: "Create a joke about programming"
+        ?
+?????????????????????????????
+?  Group Chat Manager       ?
+?  • Manages turn-taking    ?
+?  • Maintains history      ?
+?  • Checks termination     ?
+?????????????????????????????
+           ?
+    [Iteration 1]
+    Creator ? "Here's a joke..."
+    Critic  ? "Rating: 6/10, needs improvement..."
+           ?
+    [Iteration 2]
+    Creator ? "Improved version..."
+    Critic  ? "Rating: 8/10, APPROVED!"
+           ?
+    ? Workflow Terminates (Quality Gate Met)
+```
 
-### Step 3: Transparent Invocation
-```csharp
-var response = await remoteAgent.RunAsync("Evaluate this joke...");
-```
-- Calls remote agent via HTTP
-- Uses A2A protocol
-- Returns structured response
+### Key Components
+
+1. **AgentWorkflowBuilder**: Creates the workflow
+2. **RoundRobinGroupChatManager**: Coordinates agent turns
+3. **ShouldTerminateAsync()**: Quality gate logic
+4. **Conversation History**: Automatically shared context
 
 ---
 
 ## ?? For Lectures/Demos
 
-### Demo Script (15 minutes)
+### Demo Script (12 minutes)
 
-**Minutes 0-3: Introduction**
+**Minutes 0-2: Introduction**
 - Show web UI at http://localhost:5000
-- Explain the two agents and their roles
+- Explain MAF Group Chat orchestration pattern
 
-**Minutes 3-5: Show Official APIs**
+**Minutes 2-4: Show Workflow Code**
 - Open `Program.cs`
-- Highlight `MapA2A()`
-- Highlight `A2AClient.GetAIAgent()`
-- Emphasize: **These are OFFICIAL MAF APIs**
+- Highlight `AgentWorkflowBuilder`
+- Show `JokeQualityManager` with `ShouldTerminateAsync()`
+- Explain quality gate logic
 
-**Minutes 5-10: Live Demo**
+**Minutes 4-6: Explain Agent Collaboration**
+- Two agents as Group Chat participants
+- Round-robin turn-taking
+- Automatic conversation history
+- No manual context passing needed
+
+**Minutes 6-10: Live Demo**
 - Create a joke about "programming"
-- Watch console logs showing A2A calls
+- Watch console logs showing agent turns
 - Show iteration process
-- Highlight final rating
+- Highlight quality gate termination
 
-**Minutes 10-12: Agent Cards**
-- Navigate to `/.well-known/agent.json` for each agent
-- Explain auto-generation
-- Show JSON structure
-
-**Minutes 12-15: Q&A**
-- Production deployment scenarios
-- Distributed agent architectures
-- Microsoft 365 Copilot extensibility
+**Minutes 10-12: Q&A**
+- When to use Group Chat vs. other patterns
+- Benefits of workflow orchestration
+- Production deployment considerations
 
 ---
 
 ## ?? Production Deployment
 
-### Deploy to Separate Services
+Group Chat workflows can be deployed as:
+- ? Single service with both agents
+- ? Distributed agents with A2A protocol
+- ? Scalable workflow execution
 
 ```bash
-# Deploy Critic Agent
-az webapp create --name joke-critic-prod \
-  --resource-group rg-agents \
-  --runtime "DOTNET|10.0"
-
-# Deploy Creator Agent (if needed separately)
-az webapp create --name joke-creator-prod \
+# Deploy as single service
+az webapp create --name joke-workflow-prod \
   --resource-group rg-agents \
   --runtime "DOTNET|10.0"
 ```
 
-### Update Configuration
-
-```csharp
-// Point to remote service
-var a2aClient = new A2AClient(
-    new Uri("https://joke-critic-prod.azurewebsites.net/agents/critic"));
-```
-
-**Benefits:**
-- ? Independent scaling
-- ? Isolated failures
-- ? Geographic distribution
-- ? Version control per agent
-
 ---
 
-## ?? Testing
+## ? Benefits of MAF Group Chat
 
-Use the included `JokeAgentsDemo.http` file:
-
-```http
-### Create a joke about programming
-POST http://localhost:5000/api/jokes/create?topic=programming
-Content-Type: application/json
-
-### Get Agent Card
-GET http://localhost:5000/agents/critic/.well-known/agent.json
-
-### Health Check
-GET http://localhost:5000/health
-```
-
----
-
-## ? Benefits of Official MAF Implementation
-
-| Feature | Manual Implementation | Official MAF |
-|---------|----------------------|--------------|
-| **Agent Cards** | ? Manual JSON | ? Auto-generated |
-| **Routing** | ? Custom endpoints | ? `MapA2A()` |
-| **Discovery** | ? HttpClient | ? `A2AClient` |
-| **Protocol** | ?? Best effort | ? Compliant |
-| **Observability** | ?? Custom | ? Built-in |
-| **State Management** | ? Manual | ? Automatic |
+| Feature | Manual Orchestration | MAF Group Chat |
+|---------|---------------------|----------------|
+| **Iteration Control** | ?? Manual loops | ? Automatic |
+| **Context Management** | ?? Manual passing | ? Automatic history |
+| **Code Complexity** | ?? More code | ? Declarative |
+| **Quality Gates** | ? Custom logic | ? `ShouldTerminateAsync()` |
+| **Maintainability** | ?? More boilerplate | ? Framework managed |
+| **Learning Curve** | ? Explicit | ?? Framework concepts |
 
 ---
 
 ## ?? Learn More
 
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
+- [Group Chat Orchestration](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/orchestrations/group-chat)
+- [MAF Workflows](https://learn.microsoft.com/en-us/agent-framework/tutorials/workflows/)
 - [GitHub Repository](https://github.com/microsoft/agent-framework)
-- [Discord Community](https://discord.gg/b5zjErwbQM)
-- [Semantic Kernel Blog](https://devblogs.microsoft.com/semantic-kernel/)
 
 ---
 
 ## ?? Summary
 
 This project demonstrates:
-- ? **Real MAF A2A APIs** - Not a simulation
-- ? **Production patterns** - Scalable, distributed agent systems
-- ? **Simple code** - Framework handles complexity
-- ? **Protocol compliance** - Official A2A specification
-- ? **Educational** - Perfect for learning and teaching
+- ? **MAF Group Chat Workflow** - Managed iterative refinement
+- ? **Custom Quality Gate** - Conditional termination logic
+- ? **Automatic Context** - Conversation history management
+- ? **Declarative Pattern** - Clean, maintainable code
+- ? **Production Ready** - Framework-managed orchestration
 
-**Perfect for teaching, learning, and building production multi-agent systems!** ????
+**Perfect for teaching MAF workflows and collaborative agent patterns!** ????
