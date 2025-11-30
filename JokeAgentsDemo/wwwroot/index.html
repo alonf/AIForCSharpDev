@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>?? Joke Agents - MAF + AG-UI Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        /* Header */
+        .header {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 3em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            font-size: 1.2em;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        .tech-badges {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .badge {
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+        
+        .badge-maf { background: #e3f2fd; color: #1976d2; }
+        .badge-agui { background: #f3e5f5; color: #7b1fa2; }
+        .badge-a2a { background: #e8f5e9; color: #388e3c; }
+        
+        /* Main Content */
+        .content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        
+        .panel {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+        
+        /* Input Area */
+        .input-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            width: 100%;
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        /* Chat Area */
+        .chat-container {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            min-height: 500px;
+            max-height: 500px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: #999;
+        }
+        
+        .empty-state-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+        
+        /* Messages */
+        .message {
+            margin-bottom: 20px;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .message-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .agent-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-right: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .avatar-user { background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); }
+        .avatar-creator { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .avatar-critic { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .avatar-system { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        
+        .agent-name {
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+        
+        .message-content {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            line-height: 1.6;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            white-space: pre-wrap;
+        }
+        
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            border-left: 4px solid #667eea;
+        }
+        
+        /* Status Indicator */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 20px;
+            background: #e3f2fd;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 600;
+            color: #1976d2;
+        }
+        
+        .status-indicator.active {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .status-indicator.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 3px solid rgba(0,0,0,0.1);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Architecture Panel */
+        .architecture {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .arch-layer {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .arch-layer h3 {
+            font-size: 1em;
+            margin-bottom: 8px;
+            color: #667eea;
+        }
+        
+        .arch-layer p {
+            font-size: 0.9em;
+            color: #666;
+            margin: 0;
+        }
+        
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2em;
+            font-weight: 700;
+            color: #667eea;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        /* Final Result */
+        .final-result {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            padding: 25px;
+            border-radius: 15px;
+            margin-top: 20px;
+            border-left: 4px solid #28a745;
+        }
+        
+        .final-result h3 {
+            color: #28a745;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .joke-text {
+            font-size: 1.1em;
+            line-height: 1.8;
+            color: #333;
+            font-style: italic;
+        }
+        
+        .rating-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #28a745;
+            color: white;
+            border-radius: 20px;
+            font-weight: 600;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>&#x1F3AD; Joke Agents Demo</h1>
+            <p class="subtitle">Multi-Agent Workflow with Microsoft Agent Framework & AG-UI</p>
+            <div class="tech-badges">
+                <span class="badge badge-maf">&#x2728; Microsoft Agent Framework</span>
+                <span class="badge badge-agui">&#x1F504; AG-UI Protocol</span>
+                <span class="badge badge-a2a">&#x1F91D; Agent-to-Agent (A2A)</span>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Left Column: Joke Creation -->
+            <div class="panel">
+                <h2>&#x1F3AA; Create a Joke</h2>
+                
+                <div class="status-indicator" id="statusIndicator">
+                    <span>&#x26A1;</span>
+                    <span id="statusText">Ready to create jokes</span>
+                </div>
+                
+                <div class="input-group">
+                    <label for="topicInput">Joke Topic</label>
+                    <input 
+                        type="text" 
+                        id="topicInput" 
+                        placeholder="Enter a topic (e.g., programming, coffee, pets...)"
+                        onkeypress="if(event.key==='Enter') createJoke()"
+                    >
+                </div>
+                
+                <button id="createButton" onclick="createJoke()">
+                    &#x1F680; Create Joke
+                </button>
+                
+                <!-- Chat Area -->
+                <div class="chat-container" id="chatContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#x1F4AD;</div>
+                        <p><strong>Enter a topic and watch the magic happen!</strong></p>
+                        <p style="margin-top: 10px; color: #bbb;">Two AI agents will collaborate to create the perfect joke</p>
+                    </div>
+                </div>
+                
+                <!-- Final Result -->
+                <div id="finalResult" style="display: none;"></div>
+            </div>
+
+            <!-- Right Column: Architecture & Stats -->
+            <div>
+                <!-- Architecture -->
+                <div class="panel">
+                    <h2>&#x1F3D7;&#xFE0F; Architecture</h2>
+                    <div class="architecture">
+                        <div class="arch-layer">
+                            <h3>1&#xFE0F;&#x20E3; AG-UI Protocol Layer</h3>
+                            <p>Handles streaming communication between agents and UI</p>
+                        </div>
+                        <div class="arch-layer">
+                            <h3>2&#xFE0F;&#x20E3; MAF Workflow</h3>
+                            <p>Group chat orchestration with quality gate</p>
+                        </div>
+                        <div class="arch-layer">
+                            <h3>3&#xFE0F;&#x20E3; A2A Communication</h3>
+                            <p>Creator &#x2194;&#xFE0F; Critic collaboration via Agent-to-Agent protocol</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="panel">
+                    <h2>&#x1F4CA; Session Stats</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-value" id="iterationCount">0</span>
+                            <div class="stat-label">Iterations</div>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="finalRating">-</span>
+                            <div class="stat-label">Rating</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- How It Works -->
+                <div class="panel">
+                    <h2>&#x2699;&#xFE0F; How It Works</h2>
+                    <ol style="line-height: 2; color: #666;">
+                        <li><strong>JokeCreator</strong> generates a joke</li>
+                        <li><strong>JokeCritic</strong> evaluates (1-10 scale)</li>
+                        <li>If rating &lt; 8, they iterate</li>
+                        <li>Quality gate ensures excellence</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentMessages = [];
+        let allJokes = [];
+        let allCriticFeedback = [];
+        let currentAgent = null;
+        let currentContent = '';
+        
+        async function createJoke() {
+            const topic = document.getElementById('topicInput').value.trim() || 'general';
+            const button = document.getElementById('createButton');
+            const container = document.getElementById('chatContainer');
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const finalResultDiv = document.getElementById('finalResult');
+            
+            // Reset state
+            container.innerHTML = '';
+            finalResultDiv.style.display = 'none';
+            currentMessages = [];
+            allJokes = [];
+            allCriticFeedback = [];
+            currentAgent = null;
+            currentContent = '';
+            updateStats(0, '-');
+            
+            // Disable button
+            button.disabled = true;
+            button.innerHTML = '&#x231B; Creating...';
+            statusIndicator.className = 'status-indicator active';
+            statusText.textContent = 'Connecting to AG-UI workflow...';
+            
+            // Add user message
+            addMessage('user', 'You', `Create a funny joke about: ${topic}`);
+            
+            try {
+                const response = await fetch('/agui/jokes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        messages: [
+                            { role: 'user', content: `Create an original, funny joke about: ${topic}` }
+                        ]
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                statusText.textContent = 'Streaming response from agents...';
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.type === 'TEXT_MESSAGE_CONTENT' && data.delta) {
+                                currentContent += data.delta;
+                                
+                                // Determine which agent is speaking based on content
+                                const newAgent = inferAgentFromContent(currentContent);
+                                
+                                // Agent switched - finalize previous message
+                                if (newAgent !== currentAgent && currentAgent !== null) {
+                                    finalizeAgentMessage(currentAgent, currentContent);
+                                    currentContent = data.delta; // Start fresh with new agent
+                                }
+                                
+                                currentAgent = newAgent;
+                                
+                                // Update display
+                                updateOrCreateMessage(currentAgent, currentContent);
+                                
+                            } else if (data.type === 'RUN_FINISHED') {
+                                // Finalize last message
+                                if (currentAgent && currentContent) {
+                                    finalizeAgentMessage(currentAgent, currentContent);
+                                }
+                                
+                                // Show final result
+                                showFinalResults();
+                            }
+                        } catch (e) {
+                            console.error('Error parsing line:', e, line);
+                        }
+                    }
+                }
+
+                statusIndicator.className = 'status-indicator';
+                statusText.textContent = '\u2705 Joke creation complete!'; // ?
+                
+            } catch (error) {
+                console.error('Error:', error);
+                statusIndicator.className = 'status-indicator error';
+                statusText.textContent = `\u274C Error: ${error.message}`; // ?
+                addMessage('system', 'System', `Error: ${error.message}`);
+            } finally {
+                button.disabled = false;
+                button.innerHTML = '&#x1F680; Create Another Joke';
+            }
+        }
+        
+        function inferAgentFromContent(content) {
+            // Look for critic-specific patterns
+            const criticPatterns = ['Rating:', 'Feedback:', 'Sentence Count:', 'Tell Time:', 
+                                   'Strengths:', 'Improvements:', 'APPROVED'];
+            
+            for (const pattern of criticPatterns) {
+                if (content.includes(pattern)) {
+                    return 'critic';
+                }
+            }
+            
+            return 'creator';
+        }
+        
+        function finalizeAgentMessage(agent, content) {
+            const trimmed = content.trim();
+            
+            if (agent === 'creator') {
+                // This is a joke from JokeCreator
+                allJokes.push(trimmed);
+                console.log(`Stored joke #${allJokes.length}:`, trimmed.substring(0, 50));
+            } else if (agent === 'critic') {
+                // This is feedback from JokeCritic
+                allCriticFeedback.push(trimmed);
+                console.log(`Stored critic feedback #${allCriticFeedback.length}`);
+                
+                // Update stats with this iteration
+                const rating = extractRating(trimmed);
+                const iterations = allJokes.length;
+                updateStats(iterations, rating);
+            }
+        }
+        
+        function showFinalResults() {
+            if (allJokes.length === 0) {
+                console.error('No jokes found!');
+                return;
+            }
+            
+            // Get the last joke and its rating
+            const finalJoke = allJokes[allJokes.length - 1];
+            const finalFeedback = allCriticFeedback[allCriticFeedback.length - 1];
+            const finalRating = extractRating(finalFeedback);
+            const iterations = allJokes.length;
+            
+            console.log('Final Results:', { finalJoke, finalRating, iterations });
+            
+            // Show the final result box
+            showFinalResult(finalJoke, finalRating, iterations);
+            
+            // Update stats one last time
+            updateStats(iterations, finalRating);
+        }
+        
+        function updateOrCreateMessage(agent, content) {
+            const container = document.getElementById('chatContainer');
+            let messageDiv = container.querySelector(`.message.${agent}:last-child`);
+            
+            if (!messageDiv) {
+                const agentName = agent === 'creator' ? 'JokeCreator' : 'JokeCritic';
+                const avatar = agent === 'creator' ? '\uD83E\uDD16' : '\uD83C\uDFAF'; // ?? : ??
+                
+                messageDiv = document.createElement('div');
+                messageDiv.className = `message ${agent}`;
+                messageDiv.innerHTML = `
+                    <div class="message-header">
+                        <div class="agent-avatar avatar-${agent}">${avatar}</div>
+                        <div class="agent-name">${agentName}</div>
+                    </div>
+                    <div class="message-content"></div>
+                `;
+                container.appendChild(messageDiv);
+            }
+            
+            const contentDiv = messageDiv.querySelector('.message-content');
+            contentDiv.textContent = content;
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function addMessage(type, name, content) {
+            const container = document.getElementById('chatContainer');
+            const avatarMap = {
+                'user': '\uD83D\uDC64',      // ??
+                'creator': '\uD83E\uDD16',   // ??
+                'critic': '\uD83C\uDFAF',    // ??
+                'system': '\u2139\uFE0F'     // ??
+            };
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="agent-avatar avatar-${type}">${avatarMap[type]}</div>
+                    <div class="agent-name">${name}</div>
+                </div>
+                <div class="message-content">${escapeHtml(content)}</div>
+            `;
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+            
+            currentMessages.push({ type, name, content });
+        }
+        
+        function extractRating(text) {
+            const match = text.match(/Rating:\s*(\d+)/i);
+            return match ? parseInt(match[1]) : 0;
+        }
+        
+        function showFinalResult(joke, rating, iterations) {
+            const finalResultDiv = document.getElementById('finalResult');
+            finalResultDiv.className = 'final-result';
+            finalResultDiv.style.display = 'block';
+            finalResultDiv.innerHTML = `
+                <h3>\uD83C\uDF89 Final Result</h3>
+                <div class="joke-text">"${escapeHtml(joke)}"</div>
+                <span class="rating-badge">\u2B50 ${rating}/10 - Approved in ${iterations} iteration(s)</span>
+            `;
+            
+            // Scroll to show it
+            finalResultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        
+        function updateStats(iterations, rating) {
+            document.getElementById('iterationCount').textContent = iterations;
+            document.getElementById('finalRating').textContent = rating > 0 ? `${rating}/10` : '-';
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
