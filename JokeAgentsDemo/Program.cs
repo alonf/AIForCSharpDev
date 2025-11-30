@@ -42,6 +42,9 @@ var app = builder.Build();
 
 app.UseCors();
 
+// Serve static files from wwwroot
+app.UseStaticFiles();
+
 // ============================================================================
 // CREATE AGENTS
 // ============================================================================
@@ -285,6 +288,170 @@ app.MapPost("/api/jokes/create", async (string? topic) =>
 }).WithName("CreateFunnyJoke");
 
 // ============================================================================
+// ORCHESTRATION API - Using MAF Group Chat Workflow with Streaming
+// ============================================================================
+
+// Streaming endpoint using Server-Sent Events (SSE)
+app.MapGet("/api/jokes/stream", async (HttpContext context, string? topic) =>
+{
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    
+    // Set up SSE headers
+    context.Response.Headers.Append("Content-Type", "text/event-stream");
+    context.Response.Headers.Append("Cache-Control", "no-cache");
+    context.Response.Headers.Append("Connection", "keep-alive");
+    
+    await context.Response.Body.FlushAsync();
+    
+    // Helper to send SSE messages
+    async Task SendEvent(string eventType, object data)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(data);
+        await context.Response.WriteAsync($"event: {eventType}\n");
+        await context.Response.WriteAsync($"data: {json}\n\n");
+        await context.Response.Body.FlushAsync();
+    }
+    
+    try
+    {
+        await SendEvent("status", new { message = "Starting joke creation workflow..." });
+        
+        logger.LogInformation("=== Starting Joke Creation Process with MAF Group Chat (Streaming) ===");
+        logger.LogInformation("Topic: {Topic}", topic ?? "general");
+        
+        // Build the group chat workflow
+        var workflow = AgentWorkflowBuilder
+            .CreateGroupChatBuilderWith(agents => 
+                new JokeQualityManager(agents, logger))
+            .AddParticipants(creatorAgent, criticAgent)
+            .Build();
+        
+        // Prepare initial prompt
+        var initialPrompt = string.IsNullOrWhiteSpace(topic)
+            ? "Create an original, funny joke."
+            : $"Create an original, funny joke about: {topic}";
+        
+        var messages = new List<ChatMessage> { new(ChatRole.User, initialPrompt) };
+        
+        await SendEvent("user_message", new { content = initialPrompt });
+        
+        // Execute the workflow
+        StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages);
+        await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
+        
+        var iterations = new List<object>();
+        int iterationCount = 0;
+        string? currentAgent = null;
+        var currentMessageBuilder = new System.Text.StringBuilder();
+        
+        await foreach (WorkflowEvent evt in run.WatchStreamAsync().ConfigureAwait(false))
+        {
+            if (evt is AgentRunUpdateEvent update)
+            {
+                var response = update.AsResponse();
+                var agentName = update.ExecutorId ?? "Unknown";
+                
+                // If agent changed, send complete message and start new one
+                if (currentAgent != null && currentAgent != agentName && currentMessageBuilder.Length > 0)
+                {
+                    await SendEvent("agent_message_complete", new
+                    {
+                        agent = currentAgent,
+                        content = currentMessageBuilder.ToString()
+                    });
+                    currentMessageBuilder.Clear();
+                }
+                
+                currentAgent = agentName;
+                
+                if (response.Messages.Any())
+                {
+                    var lastMessage = response.Messages.Last();
+                    if (!string.IsNullOrEmpty(lastMessage.Text))
+                    {
+                        currentMessageBuilder.Append(lastMessage.Text);
+                        
+                        // Stream the chunk to client
+                        await SendEvent("agent_chunk", new
+                        {
+                            agent = agentName,
+                            content = lastMessage.Text,
+                            streaming = true
+                        });
+                    }
+                }
+            }
+            else if (evt is WorkflowOutputEvent output)
+            {
+                // Send final complete message if any
+                if (currentAgent != null && currentMessageBuilder.Length > 0)
+                {
+                    await SendEvent("agent_message_complete", new
+                    {
+                        agent = currentAgent,
+                        content = currentMessageBuilder.ToString()
+                    });
+                }
+                
+                var conversationHistory = output.As<List<ChatMessage>>() ?? new List<ChatMessage>();
+                
+                // Process iterations
+                for (int i = 1; i < conversationHistory.Count; i += 2)
+                {
+                    if (i + 1 < conversationHistory.Count)
+                    {
+                        var jokeMessage = conversationHistory[i];
+                        var evaluationMessage = conversationHistory[i + 1];
+                        
+                        if (jokeMessage.AuthorName != "user" && evaluationMessage.AuthorName != "user")
+                        {
+                            var joke = jokeMessage.Text ?? "";
+                            var evaluation = evaluationMessage.Text ?? "";
+                            var rating = JokeQualityManager.ExtractRating(evaluation);
+                            var sentenceCount = JokeQualityManager.ExtractSentenceCount(evaluation);
+                            var tellTime = JokeQualityManager.ExtractTellTime(evaluation);
+                            
+                            iterationCount++;
+                            
+                            await SendEvent("iteration_complete", new
+                            {
+                                iteration = iterationCount,
+                                joke,
+                                rating,
+                                sentenceCount,
+                                tellTime,
+                                feedback = evaluation,
+                                success = rating >= 8
+                            });
+                        }
+                    }
+                }
+                
+                var finalRating = iterationCount > 0 ? 
+                    JokeQualityManager.ExtractRating(conversationHistory.Last().Text ?? "") : 0;
+                var finalJoke = iterationCount > 0 ? 
+                    conversationHistory[conversationHistory.Count - 2].Text ?? "" : "";
+                
+                await SendEvent("workflow_complete", new
+                {
+                    success = finalRating >= 8,
+                    finalJoke,
+                    finalRating,
+                    totalIterations = iterationCount
+                });
+                
+                break;
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error in streaming workflow");
+        await SendEvent("error", new { message = ex.Message });
+    }
+}).WithName("StreamJokeCreation");
+
+// ============================================================================
 // WEB UI
 // ============================================================================
 
@@ -340,6 +507,64 @@ app.MapGet("/", () => Results.Content("""
             color: #666;
             font-size: 1.1em;
         }
+        .demo-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .demo-card {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            text-align: center;
+            transition: transform 0.2s;
+        }
+        .demo-card:hover {
+            transform: translateY(-5px);
+        }
+        .demo-card h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.8em;
+        }
+        .demo-card .icon {
+            font-size: 4em;
+            margin-bottom: 15px;
+        }
+        .demo-card p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+        .demo-card a {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        .demo-card a:hover {
+            transform: scale(1.05);
+        }
+        .badge-new {
+            display: inline-block;
+            background: #ff6b6b;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 0.7em;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
         .content {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -353,65 +578,10 @@ app.MapGet("/", () => Results.Content("""
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
         .full-width { grid-column: 1 / -1; }
-        h2 {
+        h3 {
             color: #667eea;
             margin-bottom: 15px;
             font-size: 1.5em;
-        }
-        input, button {
-            width: 100%;
-            padding: 12px;
-            margin: 10px 0;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 16px;
-        }
-        button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-            transition: transform 0.2s;
-        }
-        button:hover { transform: scale(1.02); }
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .result {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 15px;
-            display: none;
-        }
-        .joke-text {
-            font-size: 1.3em;
-            color: #333;
-            margin: 15px 0;
-            padding: 15px;
-            background: #fff;
-            border-left: 4px solid #667eea;
-            border-radius: 5px;
-        }
-        .rating {
-            font-size: 2em;
-            font-weight: bold;
-            color: #667eea;
-        }
-        .iteration {
-            background: white;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 8px;
-            border-left: 4px solid #ddd;
-        }
-        .iteration.success { border-left-color: #28a745; }
-        .loading {
-            text-align: center;
-            color: #667eea;
-            font-style: italic;
         }
         .endpoint {
             background: #f8f9fa;
@@ -419,30 +589,6 @@ app.MapGet("/", () => Results.Content("""
             margin: 10px 0;
             border-radius: 8px;
             font-family: 'Courier New', monospace;
-        }
-        .badge {
-            display: inline-block;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 0.9em;
-            font-weight: bold;
-            margin-right: 5px;
-        }
-        .badge-success { background: #28a745; color: white; }
-        .badge-warning { background: #ffc107; color: black; }
-        .badge-info { background: #17a2b8; color: white; }
-        .feature-list {
-            background: #e8f5e9;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-        }
-        .feature-list ul {
-            margin-left: 20px;
-            color: #2e7d32;
-        }
-        .feature-list li {
-            margin: 5px 0;
         }
     </style>
 </head>
@@ -454,27 +600,53 @@ app.MapGet("/", () => Results.Content("""
             <span class="badge-maf">&#10004; Using MAF Workflows</span>
         </div>
 
+        <div class="demo-options">
+            <div class="demo-card">
+                <div class="icon">⚡</div>
+                <h2>Live Streaming <span class="badge-new">NEW!</span></h2>
+                <p><strong>Real-time agent collaboration!</strong></p>
+                <p>Watch agents think, create, and improve jokes as they work. See every word appear live with typing animations and status updates.</p>
+                <ul style="text-align: left; color: #666; margin: 15px 0; line-height: 1.8;">
+                    <li>✅ Word-by-word streaming</li>
+                    <li>✅ Live agent indicators</li>
+                    <li>✅ Progress tracking</li>
+                    <li>✅ ChatGPT-style UX</li>
+                </ul>
+                <a href="/streaming.html">🎬 Launch Streaming Demo</a>
+            </div>
+
+            <div class="demo-card">
+                <div class="icon">📊</div>
+                <h2>Classic View</h2>
+                <p><strong>Traditional API-based interface</strong></p>
+                <p>Submit a request and get comprehensive results all at once. Perfect for understanding the complete workflow structure.</p>
+                <ul style="text-align: left; color: #666; margin: 15px 0; line-height: 1.8;">
+                    <li>✅ Complete iteration history</li>
+                    <li>✅ Detailed feedback</li>
+                    <li>✅ Metrics and stats</li>
+                    <li>✅ JSON response format</li>
+                </ul>
+                <a href="/classic.html">📋 Launch Classic Demo</a>
+            </div>
+        </div>
+
         <div class="content">
             <div class="panel full-width">
-                <h2>Create a Funny Joke</h2>
-                <p>Watch two AI agents collaborate using <strong>MAF Group Chat workflow</strong> to create the perfect joke!</p>
-                <div class="feature-list">
-                    <strong>&#127919; Using Microsoft Agent Framework:</strong>
-                    <ul>
-                        <li><code>GroupChatBuilder</code> - Workflow orchestration</li>
-                        <li><code>RoundRobinGroupChatManager</code> - Agent coordination</li>
-                        <li><code>ShouldTerminateAsync()</code> - Custom quality gate</li>
-                        <li>Automatic conversation history management</li>
-                    </ul>
-                </div>
-                <input type="text" id="topic" placeholder="Enter a topic (optional, e.g., 'programming', 'cats')">
-                <button onclick="createJoke()" id="createBtn">&#127914; Create Funny Joke (MAF Workflow)</button>
-                <div id="result" class="result"></div>
+                <h3>🎯 What This Demonstrates</h3>
+                <p style="color: #666; line-height: 1.8;">
+                    Two AI agents collaborate using <strong>MAF Group Chat workflow</strong> to create high-quality jokes:
+                </p>
+                <ol style="color: #666; margin: 15px 0 15px 20px; line-height: 1.8;">
+                    <li><strong>JokeCreator</strong> (🤖) generates original jokes</li>
+                    <li><strong>JokeCritic</strong> (🎯) evaluates quality (1-10 scale)</li>
+                    <li>They iterate until rating ≥ 8 or max iterations reached</li>
+                    <li><strong>Quality Gate</strong> ensures only great jokes pass</li>
+                </ol>
             </div>
 
             <div class="panel">
-                <h2>&#129302; JokeCreator Agent</h2>
-                <p>Creates and improves jokes</p>
+                <h3>&#129302; JokeCreator Agent</h3>
+                <p style="color: #666;">Creates and improves jokes based on feedback</p>
                 <div class="endpoint">
                     <div><strong>Endpoint:</strong> /agents/creator</div>
                     <div><strong>Pattern:</strong> Group Chat Participant</div>
@@ -482,8 +654,8 @@ app.MapGet("/", () => Results.Content("""
             </div>
 
             <div class="panel">
-                <h2>&#127919; JokeCritic Agent</h2>
-                <p>Evaluates jokes and provides feedback</p>
+                <h3>&#127919; JokeCritic Agent</h3>
+                <p style="color: #666;">Evaluates jokes with strict quality standards</p>
                 <div class="endpoint">
                     <div><strong>Endpoint:</strong> /agents/critic</div>
                     <div><strong>Pattern:</strong> Group Chat Participant</div>
@@ -492,74 +664,19 @@ app.MapGet("/", () => Results.Content("""
         </div>
 
         <div class="panel">
-            <h2>&#128200; How MAF Group Chat Works</h2>
-            <ol style="line-height:1.8; color:#666; margin-left:20px">
-                <li><strong>Group Chat Manager:</strong> Coordinates agent turns using <code>RoundRobinGroupChatManager</code></li>
-                <li><strong>Iterative Refinement:</strong> Agents take turns, each seeing full conversation history</li>
-                <li><strong>Quality Gate:</strong> <code>ShouldTerminateAsync()</code> checks rating and terminates when ≥8</li>
-                <li><strong>Automatic Context:</strong> Conversation history automatically shared between agents</li>
-                <li><strong>Managed Iteration:</strong> Framework handles turn-taking and history</li>
-            </ol>
+            <h3>&#128200; MAF Group Chat Orchestration</h3>
+            <p style="color: #666; margin-bottom: 15px;">
+                This demo uses the <strong>Microsoft Agent Framework</strong> to manage multi-agent collaboration:
+            </p>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><code>AgentWorkflowBuilder</code> - Declarative workflow construction</li>
+                <li><code>RoundRobinGroupChatManager</code> - Automatic turn coordination</li>
+                <li><code>ShouldTerminateAsync()</code> - Custom quality gate logic</li>
+                <li>Automatic conversation history management</li>
+                <li>Real-time streaming via Server-Sent Events (SSE)</li>
+            </ul>
         </div>
     </div>
-
-    <script>
-        async function createJoke() {
-            const topic = document.getElementById('topic').value;
-            const btn = document.getElementById('createBtn');
-            const result = document.getElementById('result');
-            
-            btn.disabled = true;
-            btn.innerHTML = '&#128260; Creating joke...';
-            result.style.display = 'block';
-            result.innerHTML = '<div class="loading">&#129302; JokeCreator and JokeCritic are collaborating via MAF Group Chat workflow...<br>Check the console for detailed logs!</div>';
-            
-            try {
-                const response = await fetch(`/api/jokes/create?topic=${encodeURIComponent(topic || '')}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                let html = `
-                    <h3>${data.success ? '&#10004; Success!' : '&#9888; Max Iterations Reached'}</h3>
-                    <p>${data.message}</p>
-                    <div class="joke-text">"${data.finalJoke}"</div>
-                    <p><span class="rating">${data.finalRating}/10</span> ${data.finalRating >= 8 ? '&#127881;' : '&#128522;'}</p>
-                    <h3 style="margin-top:20px">Iteration History (Group Chat Turns):</h3>
-                `;
-                
-                data.iterations.forEach(iter => {
-                    const isSuccess = iter.rating >= 8;
-                    html += `
-                        <div class="iteration ${isSuccess ? 'success' : ''}">
-                            <div>
-                                <span class="badge badge-info">Iteration ${iter.iteration}</span>
-                                <span class="badge ${isSuccess ? 'badge-success' : 'badge-warning'}">Rating: ${iter.rating}/10</span>
-                            </div>
-                            <div style="margin-top:10px"><strong>Joke:</strong> "${iter.joke}"</div>
-                            <div style="margin-top:5px;color:#666"><strong>Feedback:</strong> ${iter.feedback}</div>
-                        </div>
-                    `;
-                });
-                
-                result.innerHTML = html;
-            } catch (error) {
-                result.innerHTML = `<p style="color:red">Error: ${error.message}</p>`;
-                console.error('Error creating joke:', error);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '&#127914; Create Another Joke';
-            }
-        }
-    </script>
 </body>
 </html>
 """, "text/html")).WithName("Home");

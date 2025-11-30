@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joke Agents Demo - Classic View</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 15px;
+            color: #667eea;
+            text-decoration: none;
+        }
+        .back-link:hover { text-decoration: underline; }
+        .panel {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+        }
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        button:hover { transform: scale(1.02); }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+        .joke-text {
+            font-size: 1.3em;
+            color: #333;
+            margin: 15px 0;
+            padding: 15px;
+            background: #fff;
+            border-left: 4px solid #667eea;
+            border-radius: 5px;
+        }
+        .rating {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .iteration {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #ddd;
+        }
+        .iteration.success { border-left-color: #28a745; }
+        .loading {
+            text-align: center;
+            color: #667eea;
+            font-style: italic;
+        }
+        .badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        .badge-success { background: #28a745; color: white; }
+        .badge-warning { background: #ffc107; color: black; }
+        .badge-info { background: #17a2b8; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/" class="back-link">? Back to Home</a>
+            <h1>?? Joke Agents Demo - Classic View</h1>
+            <p style="color: #666; font-size: 1.1em;">Traditional API-based interface with complete results</p>
+        </div>
+
+        <div class="panel">
+            <h2>Create a Funny Joke</h2>
+            <p>Submit a request and get comprehensive iteration history all at once.</p>
+            <input type="text" id="topic" placeholder="Enter a topic (optional, e.g., 'programming', 'cats')">
+            <button onclick="createJoke()" id="createBtn">?? Create Funny Joke</button>
+            <div id="result" class="result"></div>
+        </div>
+    </div>
+
+    <script>
+        async function createJoke() {
+            const topic = document.getElementById('topic').value;
+            const btn = document.getElementById('createBtn');
+            const result = document.getElementById('result');
+            
+            btn.disabled = true;
+            btn.innerHTML = '&#128260; Creating joke...';
+            result.style.display = 'block';
+            result.innerHTML = '<div class="loading">&#129302; JokeCreator and JokeCritic are collaborating...<br>Please wait...</div>';
+            
+            try {
+                const response = await fetch(`/api/jokes/create?topic=${encodeURIComponent(topic || '')}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                let html = `
+                    <h3>${data.success ? '&#10004; Success!' : '&#9888; Max Iterations Reached'}</h3>
+                    <p>${data.message}</p>
+                    <div class="joke-text">"${data.finalJoke}"</div>
+                    <p><span class="rating">${data.finalRating}/10</span> ${data.finalRating >= 8 ? '&#127881;' : '&#128522;'}</p>
+                    <h3 style="margin-top:20px">Iteration History (Group Chat Turns):</h3>
+                `;
+                
+                data.iterations.forEach(iter => {
+                    const isSuccess = iter.rating >= 8;
+                    html += `
+                        <div class="iteration ${isSuccess ? 'success' : ''}">
+                            <div>
+                                <span class="badge badge-info">Iteration ${iter.iteration}</span>
+                                <span class="badge ${isSuccess ? 'badge-success' : 'badge-warning'}">Rating: ${iter.rating}/10</span>
+                            </div>
+                            <div style="margin-top:10px"><strong>Joke:</strong> "${iter.joke}"</div>
+                            <div style="margin-top:5px;color:#666"><strong>Feedback:</strong> ${iter.feedback}</div>
+                        </div>
+                    `;
+                });
+                
+                result.innerHTML = html;
+            } catch (error) {
+                result.innerHTML = `<p style="color:red">Error: ${error.message}</p>`;
+                console.error('Error creating joke:', error);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '?? Create Another Joke';
+            }
+        }
+    </script>
+</body>
+</html>
