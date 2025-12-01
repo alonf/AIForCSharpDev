@@ -1,9 +1,12 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using System.Linq;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using OllamaSharp; // Added
 
-// Simple demo that ensures a local Ollama container with llama3.1:8b is running, then asks it to write C# code
-// for a function that computes the Nth digit of PI, generates a console project on the fly, compiles and runs it.
+// Demo: Ensure local Ollama (llama3.1:8b) is running, then use Microsoft Agent Framework with OllamaSharp
+// (OllamaApiClient implements IChatClient) to generate C# code, compile, and run it.
 
 // Configuration
 const string OllamaContainerName = "ollama";
@@ -11,23 +14,31 @@ const string OllamaImage = "ollama/ollama:latest";
 const string OllamaModel = "llama3.1:8b"; // model tag
 const int OllamaPort = 11434; // API port
 
-Console.WriteLine("=== Local Ollama Agent Demo ===");
+Console.WriteLine("=== Local Ollama Agent Demo (MAF + OllamaSharp) ===");
 await EnsureOllamaAndModelAsync();
-Console.WriteLine("Ollama runtime and model ready. Creating agent...");
+Console.WriteLine("Ollama runtime and model ready. Creating MAF agent...");
 
-// Minimal agent wrapper using Ollama HTTP API directly (no SDK dependency).
-var agent = new OllamaCodeAgent($"http://localhost:{OllamaPort}", OllamaModel);
+// Use OllamaSharp client (implements IChatClient)
+IChatClient ollamaClient = new OllamaApiClient(new Uri($"http://localhost:{OllamaPort}"), OllamaModel);
+
+AIAgent agent = ollamaClient.CreateAIAgent(
+    instructions: "You are an expert C# programmer. Always answer with a complete, compilable C# console program in a single file.",
+    name: "LocalCSharpCoder");
 
 // Prompt for code generation
-string prompt = @"You are an expert C# programmer. Write a single self-contained C# method:
+string prompt = @"Write a C# console app that includes a single static method:
 public static int NthDigitOfPi(int n)
-that returns the nth digit (0-based after decimal point) of PI (3.14159...). Avoid using big external libraries.
-Use a short spigot / BBP style algorithm or approximation good for first ~200 digits. Include a small Main demonstrating it.";
+- It returns the nth digit (0-based after the decimal point) of PI (3.14159...).
+- Use a short BBP/spigot/series approach accurate for the first ~200 digits.
+- Include a Program.Main that prints NthDigitOfPi(0), NthDigitOfPi(1), NthDigitOfPi(2), NthDigitOfPi(10).
+- Do not reference external packages.
+- Output only code.";
 
-string codeResponse = await agent.GenerateAsync(prompt);
+AgentRunResponse run = await agent.RunAsync(prompt);
+string codeResponse = run?.ToString() ?? string.Empty;
 Console.WriteLine("--- Raw Model Output ---\n" + codeResponse + "\n------------------------");
 
-// Extract code (naively) - we look for a code fence first
+// Extract code (naively) - prefer fenced blocks, else use whole text
 string extracted = ExtractCSharp(codeResponse);
 if (string.IsNullOrWhiteSpace(extracted))
 {
@@ -133,53 +144,50 @@ static bool RunProcess(string fileName, string args)
 
 static string ExtractCSharp(string text)
 {
-    // Try fenced code block first
-    var fenceStart = text.IndexOf("```csharp", StringComparison.OrdinalIgnoreCase);
-    if (fenceStart >= 0)
+    string Extract(string marker)
     {
-        var after = fenceStart + 8;
-        var fenceEnd = text.IndexOf("```", after, StringComparison.Ordinal);
-        if (fenceEnd > after)
-            return text.Substring(after, fenceEnd - after).Trim();
+        var idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return string.Empty;
+        int after = idx + marker.Length; // correct offset to skip whole marker
+        // Skip a single optional newline after the fence
+        if (after < text.Length && (text[after] == '\r' || text[after] == '\n'))
+        {
+            if (text[after] == '\r' && after + 1 < text.Length && text[after + 1] == '\n') after += 2; else after += 1;
+        }
+        var end = text.IndexOf("```", after, StringComparison.Ordinal);
+        if (end > after)
+        {
+            var code = text.Substring(after, end - after).TrimStart('\uFEFF').Trim();
+            // If the very first line is a single stray char (e.g., 'p') followed by code, drop it
+            var parts = code.Split(new[] { "\r\n", "\n" }, 2, StringSplitOptions.None);
+            if (parts.Length == 2 && parts[0].Length == 1 && parts[1].TrimStart().StartsWith("using "))
+                return parts[1];
+            return code;
+        }
+        return string.Empty;
     }
-    fenceStart = text.IndexOf("```cs", StringComparison.OrdinalIgnoreCase);
-    if (fenceStart >= 0)
+
+    // Try common language fences
+    var code = Extract("```csharp");
+    if (!string.IsNullOrEmpty(code)) return code;
+    code = Extract("```cs");
+    if (!string.IsNullOrEmpty(code)) return code;
+    code = Extract("```C#");
+    if (!string.IsNullOrEmpty(code)) return code;
+    code = Extract("```c#");
+    if (!string.IsNullOrEmpty(code)) return code;
+
+    // Generic triple backticks
+    var genericIdx = text.IndexOf("```", StringComparison.Ordinal);
+    if (genericIdx >= 0)
     {
-        var after = fenceStart + 5;
-        var fenceEnd = text.IndexOf("```", after, StringComparison.Ordinal);
-        if (fenceEnd > after)
-            return text.Substring(after, fenceEnd - after).Trim();
+        int after = genericIdx + 3;
+        var end = text.IndexOf("```", after, StringComparison.Ordinal);
+        if (end > after)
+        {
+            return text.Substring(after, end - after).Trim();
+        }
     }
+
     return string.Empty;
-}
-
-public class OllamaCodeAgent
-{
-    private readonly string _baseUrl;
-    private readonly string _model;
-    private readonly HttpClient _http = new();
-
-    public OllamaCodeAgent(string baseUrl, string model)
-    {
-        _baseUrl = baseUrl.TrimEnd('/');
-        _model = model;
-    }
-
-    public async Task<string> GenerateAsync(string prompt)
-    {
-        // Use Ollama /api/generate to stream; here we aggregate for simplicity.
-        var req = new { model = _model, prompt, stream = false }; // full response
-        var resp = await _http.PostAsJsonAsync(_baseUrl + "/api/generate", req);
-        resp.EnsureSuccessStatusCode();
-        var json = await resp.Content.ReadFromJsonAsync<GenerateResponse>();
-        return json?.response ?? "(empty)";
-    }
-
-    private sealed class GenerateResponse
-    {
-        public string? model { get; set; }
-        public string? created_at { get; set; }
-        public string? response { get; set; }
-        public bool done { get; set; }
-    }
 }
