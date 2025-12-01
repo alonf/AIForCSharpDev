@@ -1,214 +1,95 @@
-# EventLogMcp - Native C# MCP Server
+# EventLogMcp
 
-A **pure C# implementation** of an MCP (Model Context Protocol) server that exposes Windows Event Log analysis tools as AI functions.
+Native C# Model Context Protocol (MCP) server that exposes Windows Event Log analytics as AI tools. The server is consumed by the `ComputerUsageAgent` sample but can be used by any MCP-aware client.
 
-## ?? Purpose
+## Key Capabilities
 
-This project demonstrates how to create **native .NET MCP tools** without external dependencies (no Python, no Poetry, no stdio transport issues). It provides Windows Event Log analysis capabilities that can be consumed by AI agents through the Microsoft Agent Framework (MAF).
+- Pure .NET implementation that runs as a single ASP.NET Core process
+- HTTP MCP endpoint at `http://localhost:5115/mcp`
+- Three Windows Event Log tools for startups, shutdowns, and uptime summaries
+- Automatic fallback from the System log to the Application log when admin rights are unavailable
+- JSON responses with camel-cased properties that are ready for AI agent consumption
 
-## ? Key Features
-
-- ? **Pure C#** - No Python or external dependencies
-- ? **In-Process** - No stdio communication, no hanging issues
-- ? **No Admin Required** - Works with Application log (falls back gracefully)
-- ? **AI Function Tools** - Uses `[Description]` attributes for automatic discovery
-- ? **Fast & Reliable** - Native performance, single-process debugging
-
-## ??? Architecture
+## Architecture
 
 ```
-AI Agent (MAF)
-     ?
-Microsoft.Extensions.AI
-     ?
-EventLogMcpServer (In-Process)
-   - GetStartupShutdownEvents()
-   - CalculateUptime()
-   - GetUsageSummary()
-     ?
+ComputerUsageAgent (MAF)
+                    |
+                    |  HTTP MCP (localhost:5115/mcp)
+                    v
+EventLogMcp (ASP.NET Core + ModelContextProtocol)
+                    |
+                    v
 System.Diagnostics.Eventing.Reader
-     ?
+                    |
+                    v
 Windows Event Log
 ```
 
-## ?? Available Tools
+## Available Tools
 
-### 1. GetStartupShutdownEvents
-```csharp
-public async Task<string> GetStartupShutdownEvents(int days = 30)
-```
-Retrieves system startup and shutdown events from Windows Event Log.
+| Tool | Description | Typical Output |
+|------|-------------|----------------|
+| `get_startup_shutdown_events` | Returns startup, shutdown, and unexpected shutdown events for the requested period. | JSON array of events ordered by timestamp. |
+| `calculate_uptime` | Calculates total uptime, average daily uptime, counts, and a day-by-day breakdown. | JSON object with aggregate statistics and per-day data. |
+| `get_usage_summary` | Produces a compact, human-readable usage summary for the requested period. | JSON object with summary text, statistics, and daily breakdown. |
 
-**Parameters:**
-- `days` - Number of days to look back (1-365)
+All tools clamp the `days` parameter to the range 1-365, serialize responses with indented JSON, and use camel-cased property names so that downstream agents can parse them consistently.
 
-**Returns:** JSON list of events with timestamps and types
+### Data Models
 
-### 2. CalculateUptime
-```csharp
-public async Task<string> CalculateUptime(int days = 30)
-```
-Calculates system uptime statistics with daily breakdown.
+- `StartupShutdownEvent`: timestamp, event type, event ID, and optional message extracted from Windows Event Log.
+- `UptimeStatistics`: total and average uptime, startup/shutdown counts, and a list of `DailyUptime` entries per day.
 
-**Parameters:**
-- `days` - Number of days to analyze (1-365)
+## Requirements
 
-**Returns:** JSON statistics including:
-- Total uptime hours
-- Average daily uptime
-- Startup/shutdown counts
-- Day-by-day breakdown
+- Windows host with access to the local Event Log
+- .NET 10 SDK (preview) because the project targets `net10.0-windows`
+- Optional administrator rights for richer System log access (falls back to Application log otherwise)
 
-### 3. GetUsageSummary
-```csharp
-public async Task<string> GetUsageSummary(int days = 30)
-```
-Provides human-readable summary of computer usage patterns.
+## Running the Server
 
-**Parameters:**
-- `days` - Number of days to analyze (1-365)
+1. Restore dependencies: `dotnet restore`
+2. Start the MCP HTTP server: `dotnet run --project EventLogMcp`
+3. The server listens on `http://localhost:5115/mcp` and logs to standard error. Keep the process running while clients connect.
 
-**Returns:** JSON formatted summary with daily events
+## Using with ComputerUsageAgent
 
-## ?? Dependencies
+1. In one terminal, start the MCP server as shown above.
+2. In a second terminal, run `dotnet run --project ComputerUsageAgent`.
+3. The agent connects to the MCP endpoint, lists the available tools, and offers prompts such as ‚ÄúShow computer usage for last 7 days.‚Äù
 
-```xml
-<PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.0.0-preview.1.25228.1" />
-<PackageReference Include="System.ComponentModel.Annotations" Version="6.0.0" />
-```
-
-## ?? Usage
-
-### As a Library Reference
-
-```csharp
-// In your AI agent project
-var mcpServer = new EventLogMcpServer();
-
-// Convert methods to AI functions
-var tools = AIFunctionFactory.Create(mcpServer);
-
-// Pass to AI agent
-AIAgent agent = client.CreateAIAgent(
-    instructions: "You are a computer usage analyst...",
-    tools: tools
-);
-
-// Agent can now call the tools automatically
-var response = await agent.RunAsync("Show me my computer usage for the last week");
-```
-
-### Direct Usage
-
-```csharp
-var server = new EventLogMcpServer();
-
-// Get events
-string eventsJson = await server.GetStartupShutdownEvents(days: 7);
-
-// Calculate uptime
-string uptimeJson = await server.CalculateUptime(days: 7);
-
-// Get summary
-string summaryJson = await server.GetUsageSummary(days: 30);
-```
-
-## ?? Event IDs Captured
+## Event IDs Captured
 
 | Event ID | Source | Meaning |
 |----------|--------|---------|
 | 6005 | System | EventLog service started (startup) |
 | 6006 | System | EventLog service stopped (shutdown) |
-| 6009 | System | OS boot (startup) |
-| 6008 | System | Unexpected shutdown |
-| 1074 | System | Process/application initiated shutdown |
+| 6009 | System | Operating system boot completed |
+| 6008 | System | Unexpected shutdown detected |
+| 1074 | System | Process or user initiated shutdown |
 
-## ?? Privilege Handling
-
-The server tries to read from the **System** event log first (requires admin), but automatically falls back to the **Application** log if access is denied. This ensures the tool works in both scenarios:
-
-- ? **With Admin**: Full access to System log events
-- ? **Without Admin**: Graceful fallback to Application log
-
-## ?? Advantages Over Python MCP Servers
-
-| Aspect | Python MCP | C# EventLogMcp |
-|--------|------------|----------------|
-| **Setup** | Python + Poetry + deps | NuGet restore only |
-| **Communication** | stdio (can hang) | In-process (reliable) |
-| **Debugging** | Multi-process | Single process |
-| **Performance** | Process overhead | Native speed |
-| **Dependencies** | Python runtime required | None |
-| **Integration** | External process | Same AppDomain |
-| **Maintenance** | Python + C# code | C# only |
-
-## ?? Models
-
-### StartupShutdownEvent
-```csharp
-public record StartupShutdownEvent
-{
-    public DateTime Timestamp { get; init; }
-    public string EventType { get; init; }  // "Startup", "Shutdown", "UnexpectedShutdown"
-    public int EventId { get; init; }
-    public string? Message { get; init; }
-}
-```
-
-### UptimeStatistics
-```csharp
-public record UptimeStatistics
-{
-    public double TotalUptimeHours { get; init; }
-    public double AverageDailyUptimeHours { get; init; }
-    public int DaysWithData { get; init; }
-    public int StartupCount { get; init; }
-    public int ShutdownCount { get; init; }
-    public List<DailyUptime> DailyBreakdown { get; init; }
-}
-```
-
-## ??? Project Structure
+## Project Layout
 
 ```
 EventLogMcp/
-??? EventLogMcp.csproj
-??? Class1.cs                      // MCP Server with [Description] decorated tools
-??? Models/
-?   ??? EventLogModels.cs          // Data models
-??? Services/
-?   ??? EventLogReader.cs          // Windows Event Log access
-??? README.md
+     EventLogMcp.csproj
+     Program.cs                // Hosts the ASP.NET Core MCP server on localhost:5115
+     Tools/
+          EventLogTools.cs        // MCP tool implementations (three public tools)
+     Services/
+          EventLogReader.cs       // Windows Event Log queries and uptime calculations
+     Models/
+          EventLogModels.cs       // Records for events, uptime stats, and per-day data
+     README.md
 ```
 
-## ?? Integration with ComputerUsageAgent
+## Troubleshooting
 
-This project is designed to be consumed by the `ComputerUsageAgent` project, replacing the external Python MCP server (EventWhisper/WinLog-MCP) with a native C# implementation.
+- Ensure the process is running on the same machine as the client; the server is not exposed externally by default.
+- If the client reports zero events, verify that the Event Log contains entries within the requested date range and that the process has privileges to read them.
+- When running without administrator rights, expect data sourced from the Application log only, which may omit some shutdown events.
 
-**Before** (External Python MCP):
-```
-ComputerUsageAgent ? stdio ? Poetry ? Python ? EventWhisper ? Windows API
-```
+## License
 
-**After** (Native C# MCP):
-```
-ComputerUsageAgent ? EventLogMcp ? Windows API
-```
-
-## ?? License
-
-MIT License - Educational demonstration project
-
-## ?? Learning Objectives
-
-This project demonstrates:
-1. Creating **native C# MCP tools** without external dependencies
-2. Using **`[Description]` attributes** for AI function metadata
-3. **In-process tool invocation** avoiding stdio issues
-4. **Windows Event Log** access via .NET APIs
-5. **Graceful degradation** (admin vs non-admin scenarios)
-6. Modern C# patterns (records, async/await, nullable references)
-
----
-
-**Built with:** .NET 10 ï C# 14 ï Microsoft.Extensions.AI ï Native MCP
+Licensed under the MIT License. See `LICENSE.txt` in the repository root for details.
