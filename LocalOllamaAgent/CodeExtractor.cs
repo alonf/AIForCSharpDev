@@ -17,10 +17,24 @@ public static class CodeExtractor
             int j = text.IndexOf("```", i + 3, StringComparison.Ordinal);
             if (j > i)
             {
-                var block = text[(i + 3)..j];
-                var parts = block.Split('\n');
-                if (parts.Length > 1 && parts[0].StartsWith("csharp", StringComparison.OrdinalIgnoreCase))
-                    return string.Join('\n', parts.Skip(1));
+                var block = text.Substring(i + 3, j - i - 3);
+                
+                // Find the first newline to check if there's a language identifier
+                int firstNewline = block.IndexOf('\n');
+                if (firstNewline >= 0)
+                {
+                    string firstLine = block.Substring(0, firstNewline).Trim();
+                    
+                    // If the first line is a language identifier (like "csharp"), skip it
+                    if (!string.IsNullOrWhiteSpace(firstLine) && 
+                        !firstLine.Contains(' ') && 
+                        !firstLine.Contains(';') &&
+                        firstLine.All(c => char.IsLetter(c) || c == '#' || c == '+'))
+                    {
+                        return block.Substring(firstNewline + 1).Trim();
+                    }
+                }
+                
                 return block.Trim();
             }
         }
