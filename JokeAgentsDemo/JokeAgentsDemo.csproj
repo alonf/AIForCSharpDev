@@ -14,7 +14,6 @@
     <PackageReference Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="1.0.0-preview.251125.1" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows.Declarative" Version="1.0.0-preview.251125.1" />
     <PackageReference Include="Microsoft.Agents.AI.Hosting.AGUI.AspNetCore" Version="1.0.0-preview.251110.1" />
-    <PackageReference Include="System.Net.ServerSentEvents" Version="10.0.0-rc.2.25502.107" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
   </ItemGroup>
 

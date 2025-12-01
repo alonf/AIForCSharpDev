@@ -2,7 +2,6 @@
 using Azure.Identity;
 using Microsoft.Extensions.AI;
 using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore; // AG-UI protocol layer
 using JokeAgentsDemo;
 

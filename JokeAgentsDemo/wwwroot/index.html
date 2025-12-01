@@ -508,27 +508,24 @@
                         try {
                             const data = JSON.parse(line.substring(6));
                             
+                            console.log('Received SSE event:', data.type, 'Delta:', data.delta?.substring(0, 50));
+                            
                             if (data.type === 'TEXT_MESSAGE_CONTENT' && data.delta) {
+                                // Just accumulate - AG-UI handles message boundaries
                                 currentContent += data.delta;
                                 
-                                // Determine which agent is speaking based on content
-                                const newAgent = inferAgentFromContent(currentContent);
-                                
-                                // Agent switched - finalize previous message
-                                if (newAgent !== currentAgent && currentAgent !== null) {
-                                    finalizeAgentMessage(currentAgent, currentContent);
-                                    currentContent = data.delta; // Start fresh with new agent
+                                // Infer agent and display
+                                currentAgent = inferAgentFromContent(currentContent);
+                                if (currentAgent) {
+                                    updateOrCreateMessage(currentAgent, currentContent);
                                 }
                                 
-                                currentAgent = newAgent;
-                                
-                                // Update display
-                                updateOrCreateMessage(currentAgent, currentContent);
-                                
                             } else if (data.type === 'RUN_FINISHED') {
-                                // Finalize last message
-                                if (currentAgent && currentContent) {
-                                    finalizeAgentMessage(currentAgent, currentContent);
+                                console.log('RUN_FINISHED received, content:', currentContent);
+                                
+                                // Finalize the message
+                                if (currentAgent && currentContent.trim()) {
+                                    finalizeAgentMessage(currentAgent, currentContent.trim());
                                 }
                                 
                                 // Show final result
@@ -541,12 +538,12 @@
                 }
 
                 statusIndicator.className = 'status-indicator';
-                statusText.textContent = '\u2705 Joke creation complete!'; // ?
+                statusText.textContent = '\u2705 Joke creation complete!';
                 
             } catch (error) {
                 console.error('Error:', error);
                 statusIndicator.className = 'status-indicator error';
-                statusText.textContent = `\u274C Error: ${error.message}`; // ?
+                statusText.textContent = `\u274C Error: ${error.message}`;
                 addMessage('system', 'System', `Error: ${error.message}`);
             } finally {
                 button.disabled = false;
@@ -571,6 +568,8 @@
         function finalizeAgentMessage(agent, content) {
             const trimmed = content.trim();
             
+            if (!trimmed) return; // Skip empty messages
+            
             if (agent === 'creator') {
                 // This is a joke from JokeCreator
                 allJokes.push(trimmed);
@@ -588,14 +587,67 @@
         }
         
         function showFinalResults() {
+            // Parse the complete conversation text to extract jokes and ratings
+            const lines = currentContent.split('\n');
+            let currentIteration = 0;
+            let currentJoke = '';
+            let currentCriticFeedback = '';
+            let inJoke = false;
+            let inCritic = false;
+            
+            for (const line of lines) {
+                if (line.includes('Iteration') && line.includes('JokeCreator:')) {
+                    if (currentJoke) {
+                        allJokes.push(currentJoke.trim());
+                    }
+                    currentJoke = '';
+                    inJoke = true;
+                    inCritic = false;
+                    currentIteration++;
+                } else if (line.includes('Iteration') && line.includes('JokeCritic:')) {
+                    if (currentJoke) {
+                        allJokes.push(currentJoke.trim());
+                        currentJoke = '';
+                    }
+                    if (currentCriticFeedback) {
+                        allCriticFeedback.push(currentCriticFeedback.trim());
+                    }
+                    currentCriticFeedback = '';
+                    inJoke = false;
+                    inCritic = true;
+                } else if (line === '---' || line.includes('FINAL APPROVED JOKE:')) {
+                    if (currentCriticFeedback) {
+                        allCriticFeedback.push(currentCriticFeedback.trim());
+                        currentCriticFeedback = '';
+                    }
+                    inJoke = false;
+                    inCritic = false;
+                } else if (inJoke && line.trim()) {
+                    currentJoke += line + '\n';
+                } else if (inCritic && line.trim()) {
+                    currentCriticFeedback += line + '\n';
+                }
+            }
+            
+            // Add any remaining content
+            if (currentJoke) {
+                allJokes.push(currentJoke.trim());
+            }
+            if (currentCriticFeedback) {
+                allCriticFeedback.push(currentCriticFeedback.trim());
+            }
+            
+            console.log('Parsed jokes:', allJokes.length);
+            console.log('Parsed feedback:', allCriticFeedback.length);
+            
             if (allJokes.length === 0) {
-                console.error('No jokes found!');
+                console.error('No jokes found in conversation');
                 return;
             }
             
             // Get the last joke and its rating
             const finalJoke = allJokes[allJokes.length - 1];
-            const finalFeedback = allCriticFeedback[allCriticFeedback.length - 1];
+            const finalFeedback = allCriticFeedback[allCriticFeedback.length - 1] || '';
             const finalRating = extractRating(finalFeedback);
             const iterations = allJokes.length;
             
@@ -614,7 +666,7 @@
             
             if (!messageDiv) {
                 const agentName = agent === 'creator' ? 'JokeCreator' : 'JokeCritic';
-                const avatar = agent === 'creator' ? '\uD83E\uDD16' : '\uD83C\uDFAF'; // ?? : ??
+                const avatar = agent === 'creator' ? '\uD83E\uDD16' : '\uD83C\uDFAF';
                 
                 messageDiv = document.createElement('div');
                 messageDiv.className = `message ${agent}`;
@@ -636,10 +688,10 @@
         function addMessage(type, name, content) {
             const container = document.getElementById('chatContainer');
             const avatarMap = {
-                'user': '\uD83D\uDC64',      // ??
-                'creator': '\uD83E\uDD16',   // ??
-                'critic': '\uD83C\uDFAF',    // ??
-                'system': '\u2139\uFE0F'     // ??
+                'user': '\uD83D\uDC64',
+                'creator': '\uD83E\uDD16',
+                'critic': '\uD83C\uDFAF',
+                'system': '\u2139\uFE0F'
             };
             
             const messageDiv = document.createElement('div');
@@ -658,6 +710,7 @@
         }
         
         function extractRating(text) {
+            if (!text) return 0;
             const match = text.match(/Rating:\s*(\d+)/i);
             return match ? parseInt(match[1]) : 0;
         }

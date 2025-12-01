@@ -103,7 +103,7 @@ internal class JokeWorkflowChatClient : IChatClient
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("=== AG-UI: Executing Joke Workflow (streaming passthrough + headers) ===");
+        _logger.LogInformation("=== AG-UI: Executing Joke Workflow (streaming) ===");
 
         // Build workflow
         var workflow = AgentWorkflowBuilder
@@ -117,79 +117,28 @@ internal class JokeWorkflowChatClient : IChatClient
         StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages);
         await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 
-        // Optional intro header (single chunk)
-        yield return new ChatResponseUpdate
-        {
-            Contents = [new TextContent("\U0001F3AD Joke Creation Workflow - Live Conversation:\n\n")],
-            Role = ChatRole.Assistant
-        };
-
-        string? currentAuthor = null;
-        int iteration = 0;
-
+        // Stream workflow events
         await foreach (WorkflowEvent evt in run.WatchStreamAsync(cancellationToken).ConfigureAwait(false))
         {
             if (evt is AgentRunUpdateEvent update)
             {
                 var response = update.AsResponse();
-                var msg = response.Messages.LastOrDefault();
-                var chunk = response.Text; // passthrough text chunk from workflow
-
-                var author = msg?.AuthorName;
-                if (!string.IsNullOrEmpty(author) && author != currentAuthor)
+                foreach (var message in response.Messages)
                 {
-                    if (author == "JokeCreator")
+                    if (!string.IsNullOrEmpty(message.Text))
                     {
-                        iteration++;
+                        // Create update with text content
                         yield return new ChatResponseUpdate
                         {
-                            Contents = [new TextContent($"\n\U0001F916 Iteration {iteration} - JokeCreator:\n")],
-                            Role = ChatRole.Assistant
+                            Contents = [new TextContent(message.Text)],
+                            Role = message.Role,
+                            AuthorName = message.AuthorName
                         };
                     }
-                    else if (author == "JokeCritic")
-                    {
-                        yield return new ChatResponseUpdate
-                        {
-                            Contents = [new TextContent($"\n\U0001F3AF Iteration {iteration} - JokeCritic:\n")],
-                            Role = ChatRole.Assistant
-                        };
-                    }
-                    currentAuthor = author;
-                }
-
-                if (!string.IsNullOrEmpty(chunk))
-                {
-                    // Pure passthrough of chunk
-                    yield return new ChatResponseUpdate
-                    {
-                        Contents = [new TextContent(chunk)],
-                        Role = ChatRole.Assistant
-                    };
                 }
             }
-            else if (evt is WorkflowOutputEvent output)
+            else if (evt is WorkflowOutputEvent)
             {
-                // Final summary with last critic rating and last creator joke
-                var history = output.As<List<ChatMessage>>() ?? new List<ChatMessage>();
-                var finalCreator = history.LastOrDefault(m => m.AuthorName == "JokeCreator" && m.Role == ChatRole.Assistant);
-                var finalCritic = history.LastOrDefault(m => m.AuthorName == "JokeCritic" && m.Role == ChatRole.Assistant);
-
-                int finalRating = 0;
-                if (!string.IsNullOrEmpty(finalCritic?.Text))
-                {
-                    finalRating = JokeQualityManager.ExtractRating(finalCritic!.Text!);
-                }
-
-                if (!string.IsNullOrEmpty(finalCreator?.Text))
-                {
-                    yield return new ChatResponseUpdate
-                    {
-                        Contents = [new TextContent($"\n\n---\n\n\U0001F389 FINAL APPROVED JOKE:\n{finalCreator!.Text}\n\n\u2705 Approved after {Math.Max(iteration, 1)} iteration(s)\n\u2B50 Final Rating: {finalRating}/10\n")],
-                        Role = ChatRole.Assistant
-                    };
-                }
-
                 yield break;
             }
         }
