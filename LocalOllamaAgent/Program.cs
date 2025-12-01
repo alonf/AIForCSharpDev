@@ -1,193 +1,177 @@
-using System.Diagnostics;
-using System.Net.Http.Json;
-using System.Linq;
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using OllamaSharp; // Added
+using OllamaSharp;
+using LocalOllamaAgent;
+using System.Text;
 
-// Demo: Ensure local Ollama (llama3.1:8b) is running, then use Microsoft Agent Framework with OllamaSharp
-// (OllamaApiClient implements IChatClient) to generate C# code, compile, and run it.
+Console.WriteLine("=== Local Multi-Agent Code Demo (MAF + OllamaSharp) ===");
 
-// Configuration
-const string OllamaContainerName = "ollama";
-const string OllamaImage = "ollama/ollama:latest";
-const string OllamaModel = "llama3.1:8b"; // model tag
-const int OllamaPort = 11434; // API port
+// Initialize Ollama runtime
+await OllamaRuntime.EnsureReadyAsync();
 
-Console.WriteLine("=== Local Ollama Agent Demo (MAF + OllamaSharp) ===");
-await EnsureOllamaAndModelAsync();
-Console.WriteLine("Ollama runtime and model ready. Creating MAF agent...");
+// Get user specification
+Console.WriteLine("Enter a simple C# console app specification: ");
+string? spec = Console.ReadLine()?.Trim();
+if (string.IsNullOrWhiteSpace(spec)) spec = "print the first 10 squares";
 
-// Use OllamaSharp client (implements IChatClient)
-IChatClient ollamaClient = new OllamaApiClient(new Uri($"http://localhost:{OllamaPort}"), OllamaModel);
+// Create agents with tools
+IChatClient ollamaClient = new OllamaApiClient(
+    new Uri($"http://localhost:{OllamaRuntime.Port}"),
+    OllamaRuntime.Model);
 
-AIAgent agent = ollamaClient.CreateAIAgent(
-    instructions: "You are an expert C# programmer. Always answer with a complete, compilable C# console program in a single file.",
-    name: "LocalCSharpCoder");
+var codeGeneratorAgent = AgentFactory.CreateCodeGenerator(ollamaClient);
+var compilerAgent = AgentFactory.CreateCompiler(ollamaClient);
+var executorAgent = AgentFactory.CreateExecutor(ollamaClient);
 
-// Prompt for code generation
-string prompt = @"Write a C# console app that includes a single static method:
-public static int NthDigitOfPi(int n)
-- It returns the nth digit (0-based after the decimal point) of PI (3.14159...).
-- Use a short BBP/spigot/series approach accurate for the first ~200 digits.
-- Include a Program.Main that prints NthDigitOfPi(0), NthDigitOfPi(1), NthDigitOfPi(2), NthDigitOfPi(10).
-- Do not reference external packages.
-- Output only code.";
+// Build and run workflow
+var workflow = AgentWorkflowBuilder
+    .CreateGroupChatBuilderWith(agents => new CodeWorkflowManager(agents))
+    .AddParticipants(codeGeneratorAgent, compilerAgent, executorAgent)
+    .Build();
 
-AgentRunResponse run = await agent.RunAsync(prompt);
-string codeResponse = run?.ToString() ?? string.Empty;
-Console.WriteLine("--- Raw Model Output ---\n" + codeResponse + "\n------------------------");
-
-// Extract code (naively) - prefer fenced blocks, else use whole text
-string extracted = ExtractCSharp(codeResponse);
-if (string.IsNullOrWhiteSpace(extracted))
+List<ChatMessage> initialMessages = new()
 {
-    Console.WriteLine("Could not find explicit code fence. Using full response as code.");
-    extracted = codeResponse;
-}
+    new ChatMessage(ChatRole.User,
+        $"Specification: {spec}\n\nCodeGenerator: Please generate the code.")
+};
 
-// Create temp project
-string tempDir = Path.Combine(Path.GetTempPath(), "PiDigitGen_" + Guid.NewGuid().ToString("N"));
-Directory.CreateDirectory(tempDir);
-string projFile = Path.Combine(tempDir, "PiDigitConsole.csproj");
-File.WriteAllText(projFile, "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>\n");
-string codeFile = Path.Combine(tempDir, "Program.cs");
-File.WriteAllText(codeFile, extracted);
+StreamingRun run = await InProcessExecution.StreamAsync(workflow, initialMessages);
+await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 
-Console.WriteLine($"Building generated project in {tempDir}...");
-if (!RunProcess("dotnet", $"build \"{projFile}\" -c Release"))
+// Buffer for collecting text until newline
+StringBuilder lineBuffer = new();
+string? currentAgent = null;
+
+// Color mapping for agents
+var agentColors = new Dictionary<string, ConsoleColor>
 {
-    Console.WriteLine("Build failed. Showing source:");
-    Console.WriteLine(extracted);
-    return;
-}
+    ["CodeGenerator"] = ConsoleColor.Cyan,
+    ["CodeCompiler"] = ConsoleColor.Yellow,
+    ["CodeExecutor"] = ConsoleColor.Green
+};
 
-string dllPath = Path.Combine(tempDir, "bin", "Release", "net10.0", "PiDigitConsole.dll");
-if (File.Exists(dllPath))
-{
-    Console.WriteLine("Running generated program...");
-    RunProcess("dotnet", $"\"{dllPath}\"");
-}
-else
-{
-    Console.WriteLine("Executable not found; build may have failed.");
-}
+Console.WriteLine("\n=== Workflow Execution ===\n");
 
-Console.WriteLine("Demo complete.");
-
-static async Task EnsureOllamaAndModelAsync()
+// Watch workflow execution with improved output handling
+await foreach (WorkflowEvent evt in run.WatchStreamAsync())
 {
-    if (!IsContainerRunning(OllamaContainerName))
+    if (evt is AgentRunUpdateEvent update)
     {
-        Console.WriteLine("Ollama container not running. Starting...");
-        RunProcess("docker", $"run -d --gpus all -p {OllamaPort}:{OllamaPort} --name {OllamaContainerName} {OllamaImage}");
-    }
-    else
-    {
-        Console.WriteLine("Ollama container already running.");
-    }
+        var response = update.AsResponse();
+        string? agentName = response.Messages.LastOrDefault()?.AuthorName;
+        string text = response.Text;
 
-    // Wait for API
-    using var http = new HttpClient();
-    http.Timeout = TimeSpan.FromSeconds(5);
-    for (int i = 0; i < 30; i++)
-    {
-        try
+        // Agent changed - flush buffer and show agent name with color
+        if (!string.IsNullOrEmpty(agentName) && agentName != currentAgent)
         {
-            var resp = await http.GetAsync($"http://localhost:{OllamaPort}/api/tags");
-            if (resp.IsSuccessStatusCode)
+            if (lineBuffer.Length > 0)
             {
-                Console.WriteLine("Ollama API reachable.");
-                break;
+                Console.WriteLine(lineBuffer.ToString());
+                lineBuffer.Clear();
+            }
+            
+            // Print agent name with color
+            Console.WriteLine();
+            if (agentColors.TryGetValue(agentName, out var color))
+            {
+                Console.ForegroundColor = color;
+                Console.WriteLine($"[{agentName}]");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.WriteLine($"[{agentName}]");
+            }
+            
+            currentAgent = agentName;
+        }
+
+        // Buffer text and only print on newlines with agent color
+        if (!string.IsNullOrEmpty(text))
+        {
+            lineBuffer.Append(text);
+
+            // Check if we have complete lines to print
+            string buffered = lineBuffer.ToString();
+            int lastNewline = buffered.LastIndexOf('\n');
+
+            if (lastNewline >= 0)
+            {
+                // Print everything up to and including the last newline with agent color
+                string toPrint = buffered.Substring(0, lastNewline + 1);
+                
+                if (currentAgent != null && agentColors.TryGetValue(currentAgent, out var color))
+                {
+                    Console.ForegroundColor = color;
+                }
+                Console.Write(toPrint);
+                Console.ResetColor();
+
+                // Keep remainder in buffer
+                lineBuffer.Clear();
+                if (lastNewline < buffered.Length - 1)
+                {
+                    lineBuffer.Append(buffered.Substring(lastNewline + 1));
+                }
             }
         }
-        catch { }
-        await Task.Delay(1000);
     }
-
-    // Ensure model present by running it once (pulls if missing)
-    Console.WriteLine($"Ensuring model {OllamaModel} is available...");
-    RunProcess("docker", $"exec {OllamaContainerName} ollama run {OllamaModel} \"Hello\"");
-}
-
-static bool IsContainerRunning(string name)
-{
-    var psi = new ProcessStartInfo("docker", "ps --filter name=" + name + " --format {{.Names}}")
+    else if (evt is WorkflowOutputEvent output)
     {
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false
-    };
-    using var p = Process.Start(psi)!;
-    string output = p.StandardOutput.ReadToEnd();
-    p.WaitForExit();
-    return output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Any(o => o.Trim() == name);
-}
-
-static bool RunProcess(string fileName, string args)
-{
-    Console.WriteLine($"> {fileName} {args}");
-    var psi = new ProcessStartInfo(fileName, args)
-    {
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false
-    };
-    using var p = Process.Start(psi)!;
-    p.OutputDataReceived += (_, e) => { if (e.Data != null) Console.WriteLine(e.Data); };
-    p.ErrorDataReceived += (_, e) => { if (e.Data != null) Console.WriteLine(e.Data); };
-    p.BeginOutputReadLine();
-    p.BeginErrorReadLine();
-    p.WaitForExit();
-    return p.ExitCode == 0;
-}
-
-static string ExtractCSharp(string text)
-{
-    string Extract(string marker)
-    {
-        var idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return string.Empty;
-        int after = idx + marker.Length; // correct offset to skip whole marker
-        // Skip a single optional newline after the fence
-        if (after < text.Length && (text[after] == '\r' || text[after] == '\n'))
+        // Flush any remaining buffer
+        if (lineBuffer.Length > 0)
         {
-            if (text[after] == '\r' && after + 1 < text.Length && text[after + 1] == '\n') after += 2; else after += 1;
+            if (currentAgent != null && agentColors.TryGetValue(currentAgent, out var color))
+            {
+                Console.ForegroundColor = color;
+            }
+            Console.WriteLine(lineBuffer.ToString());
+            Console.ResetColor();
         }
-        var end = text.IndexOf("```", after, StringComparison.Ordinal);
-        if (end > after)
+
+        var history = output.As<List<ChatMessage>>();
+        var finalMessage = history?.LastOrDefault();
+
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine("\n=== Workflow Complete ===\n");
+        Console.ResetColor();
+
+        if (finalMessage?.AuthorName == "CodeExecutor" &&
+            finalMessage.Text?.Contains("SUCCESS", StringComparison.OrdinalIgnoreCase) == true)
         {
-            var code = text.Substring(after, end - after).TrimStart('\uFEFF').Trim();
-            // If the very first line is a single stray char (e.g., 'p') followed by code, drop it
-            var parts = code.Split(new[] { "\r\n", "\n" }, 2, StringSplitOptions.None);
-            if (parts.Length == 2 && parts[0].Length == 1 && parts[1].TrimStart().StartsWith("using "))
-                return parts[1];
-            return code;
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("? Code generation and execution completed successfully!");
+            Console.ResetColor();
+
+            // Save generated code if available
+            var generatorMessage = history?.FirstOrDefault(m =>
+                m.AuthorName == "CodeGenerator" && m.Text?.Contains("```") == true);
+
+            if (generatorMessage != null)
+            {
+                string code = CodeExtractor.Extract(generatorMessage.Text!);
+                if (!string.IsNullOrWhiteSpace(code))
+                {
+                    Directory.CreateDirectory("GeneratedProgram");
+                    File.WriteAllText(Path.Combine("GeneratedProgram", "Program.cs"), code);
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine("?? Saved code to GeneratedProgram/Program.cs");
+                    Console.ResetColor();
+                }
+            }
         }
-        return string.Empty;
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("?? Workflow completed but execution may not have succeeded.");
+            Console.WriteLine($"Last agent: {finalMessage?.AuthorName}");
+            Console.ResetColor();
+        }
+        break;
     }
-
-    // Try common language fences
-    var code = Extract("```csharp");
-    if (!string.IsNullOrEmpty(code)) return code;
-    code = Extract("```cs");
-    if (!string.IsNullOrEmpty(code)) return code;
-    code = Extract("```C#");
-    if (!string.IsNullOrEmpty(code)) return code;
-    code = Extract("```c#");
-    if (!string.IsNullOrEmpty(code)) return code;
-
-    // Generic triple backticks
-    var genericIdx = text.IndexOf("```", StringComparison.Ordinal);
-    if (genericIdx >= 0)
-    {
-        int after = genericIdx + 3;
-        var end = text.IndexOf("```", after, StringComparison.Ordinal);
-        if (end > after)
-        {
-            return text.Substring(after, end - after).Trim();
-        }
-    }
-
-    return string.Empty;
 }
+
+Console.ForegroundColor = ConsoleColor.White;
+Console.WriteLine("\n?? Demo complete.");
+Console.ResetColor();

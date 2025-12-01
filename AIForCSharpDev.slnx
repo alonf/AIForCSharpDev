@@ -3,4 +3,5 @@
   <Project Path="EventLogMcp/EventLogMcp.csproj" />
   <Project Path="HelloAgent/HelloAgent.csproj" />
   <Project Path="JokeAgentsDemo/JokeAgentsDemo.csproj" />
+  <Project Path="LocalOllamaAgent/LocalOllamaAgent.csproj" />
 </Solution>
