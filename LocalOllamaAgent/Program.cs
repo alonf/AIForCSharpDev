@@ -1,11 +1,11 @@
-using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
-using OllamaSharp;
-using LocalOllamaAgent;
 using System.Text;
 using Azure.AI.OpenAI;
 using Azure.Identity;
+using LocalOllamaAgent;
+using LocalOllamaAgent.Tools;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
+using OllamaSharp;
 
 Console.WriteLine("=== Multi-Agent Code Demo (MAF) ===");
 
@@ -46,25 +46,32 @@ Console.WriteLine("\nEnter a simple C# console app specification: ");
 string? spec = Console.ReadLine()?.Trim();
 if (string.IsNullOrWhiteSpace(spec)) spec = "print the first 10 squares";
 
+int compileBaseline = ToolCallTracker.CompileCalls;
+int executeBaseline = ToolCallTracker.ExecuteCalls;
+Func<bool> compileAudit = () => ToolCallTracker.CompileCalls > compileBaseline;
+Func<bool> executeAudit = () => ToolCallTracker.ExecuteCalls > executeBaseline;
+
 // Create agents with tools
 var codeGeneratorAgent = AgentFactory.CreateCodeGenerator(chatClient);
 var compilerAgent = AgentFactory.CreateCompiler(chatClient);
 var executorAgent = AgentFactory.CreateExecutor(chatClient);
-var validatorAgent = AgentFactory.CreateValidator(chatClient);
+var validatorAgent = AgentFactory.CreateValidator(chatClient, spec);
 
 // Build and run workflow
 var workflow = AgentWorkflowBuilder
-    .CreateGroupChatBuilderWith(agents => new CodeWorkflowManager(agents))
+    .CreateGroupChatBuilderWith(agents => new CodeWorkflowManager(agents, compileAudit, executeAudit))
     .AddParticipants(codeGeneratorAgent, compilerAgent, executorAgent, validatorAgent)
     .Build();
 
-List<ChatMessage> initialMessages = new()
-{
-    new ChatMessage(ChatRole.System,
+List<ChatMessage> initialMessages =
+[
+    new(ChatRole.System,
         "You are a coordinated team (CodeGenerator, CodeCompiler, CodeExecutor, CodeValidator). Follow the workflow contract: generator produces code + CODE_READY, compiler compiles using tools, executor runs DLL_PATH results, validator checks output against spec."),
-    new ChatMessage(ChatRole.User,
+
+    new(ChatRole.System, $"Original user specification: {spec}"),
+    new(ChatRole.User,
         $"Specification: {spec}\n\nCodeGenerator: Call GenerateCode(specification) once, then respond with the required ```csharp block followed by CODE_READY.")
-};
+];
 
 StreamingRun run = await InProcessExecution.StreamAsync(workflow, initialMessages);
 await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
@@ -72,6 +79,11 @@ await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 // Buffer for collecting text until newline
 StringBuilder lineBuffer = new();
 string? currentAgent = null;
+bool compilerToolReminderSent = false;
+bool executorToolReminderSent = false;
+bool validatorAuditReminderSent = false;
+string? lastCompilerViolationSignature = null;
+string? lastExecutorViolationSignature = null;
 
 // Color mapping for agents
 var agentColors = new Dictionary<string, ConsoleColor>
@@ -92,6 +104,26 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         var response = update.AsResponse();
         string? agentName = response.Messages.LastOrDefault()?.AuthorName;
         string text = response.Text;
+        string? fullMessage = response.Messages.LastOrDefault()?.Text;
+        bool compileToolInvoked = compileAudit();
+        bool executeToolInvoked = executeAudit();
+
+        if (compileToolInvoked)
+        {
+            compilerToolReminderSent = false;
+            lastCompilerViolationSignature = null;
+        }
+
+        if (executeToolInvoked)
+        {
+            executorToolReminderSent = false;
+            lastExecutorViolationSignature = null;
+        }
+
+        if (compileToolInvoked && executeToolInvoked)
+        {
+            validatorAuditReminderSent = false;
+        }
 
         // Agent changed - flush buffer and show agent name with color
         if (!string.IsNullOrEmpty(agentName) && agentName != currentAgent)
@@ -147,6 +179,72 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
                 }
             }
         }
+
+        if (agentName is not null)
+        {
+            if (agentName.Equals("CodeCompiler", StringComparison.OrdinalIgnoreCase) && !compileToolInvoked)
+            {
+                bool violationDetected = !string.IsNullOrEmpty(fullMessage) &&
+                    (fullMessage.Contains("CODE_READY", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("COMPILED_SUCCESS", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("COMPILATION_FAILED", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("\"name\": \"CompileCode\"", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("\"name\":\"CompileCode\"", StringComparison.OrdinalIgnoreCase));
+
+                if (violationDetected)
+                {
+                    string signature = fullMessage!.Trim();
+                    if (!compilerToolReminderSent || !string.Equals(lastCompilerViolationSignature, signature, StringComparison.Ordinal))
+                    {
+                        compilerToolReminderSent = true;
+                        lastCompilerViolationSignature = signature;
+                        await run.TrySendMessageAsync(new ChatMessage(ChatRole.System,
+                            "Tool audit: CodeCompiler has not invoked CompileCode. Call the CompileCode tool now and respond with the tool output only."));
+                    }
+                }
+            }
+            else if (agentName.Equals("CodeExecutor", StringComparison.OrdinalIgnoreCase) && !executeToolInvoked)
+            {
+                bool violationDetected = !string.IsNullOrEmpty(fullMessage) &&
+                    (fullMessage.Contains("DLL_PATH:", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("SUCCESS - Execution completed", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("EXECUTION_FAILED", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("\"name\": \"ExecuteCode\"", StringComparison.OrdinalIgnoreCase) ||
+                     fullMessage.Contains("\"name\":\"ExecuteCode\"", StringComparison.OrdinalIgnoreCase));
+
+                if (violationDetected)
+                {
+                    string signature = fullMessage!.Trim();
+                    if (!executorToolReminderSent || !string.Equals(lastExecutorViolationSignature, signature, StringComparison.Ordinal))
+                    {
+                        executorToolReminderSent = true;
+                        lastExecutorViolationSignature = signature;
+                        await run.TrySendMessageAsync(new ChatMessage(ChatRole.System,
+                            "Tool audit: CodeExecutor has not invoked ExecuteCode. Call the ExecuteCode tool now and echo its response verbatim."));
+                    }
+                }
+            }
+            else if (agentName.Equals("CodeValidator", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!validatorAuditReminderSent && (!compileToolInvoked || !executeToolInvoked))
+                {
+                    if (!string.IsNullOrEmpty(text) &&
+                        text.Contains("VALIDATION_SUCCESS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        validatorAuditReminderSent = true;
+                        string missing = (!compileToolInvoked, !executeToolInvoked) switch
+                        {
+                            (true, true) => "CompileCode and ExecuteCode",
+                            (true, false) => "CompileCode",
+                            (false, true) => "ExecuteCode",
+                            _ => "CompileCode or ExecuteCode"
+                        };
+                        await run.TrySendMessageAsync(new ChatMessage(ChatRole.System,
+                            $"Tool audit: {missing} tool output missing. CodeValidator must reply with VALIDATION_FAILED and instruct the responsible agent to call the tool."));
+                    }
+                }
+            }
+        }
     }
     else if (evt is WorkflowOutputEvent output)
     {
@@ -169,22 +267,25 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         Console.ResetColor();
 
         if ((finalMessage?.AuthorName == "CodeValidator" &&
-             finalMessage.Text?.Contains("VALIDATION_SUCCESS", StringComparison.OrdinalIgnoreCase) == true) ||
+             finalMessage.Text.Contains("VALIDATION_SUCCESS", StringComparison.OrdinalIgnoreCase)) ||
             (finalMessage?.AuthorName == "CodeExecutor" &&
-             finalMessage.Text?.Contains("SUCCESS", StringComparison.OrdinalIgnoreCase) == true))
+             finalMessage.Text.Contains("SUCCESS", StringComparison.OrdinalIgnoreCase)))
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("? Code generation, execution, and validation completed successfully!");
+            Console.WriteLine("* Code generation, execution, and validation completed successfully!");
+            Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"Tool calls: CompileCode={ToolCallTracker.CompileCalls - compileBaseline}, ExecuteCode={ToolCallTracker.ExecuteCalls - executeBaseline}");
             Console.ResetColor();
 
             // Save generated code if available
             var generatorMessage = history?.LastOrDefault(m =>
-                m.AuthorName == "CodeGenerator" && m.Text?.Contains("```") == true);
+                m.AuthorName == "CodeGenerator" && m.Text.Contains("```"));
 
             var artifactDirectory = history is null ? null : TryGetArtifactDirectory(history);
             if (generatorMessage != null)
             {
-                string code = CodeExtractor.Extract(generatorMessage.Text!);
+                string code = CodeExtractor.Extract(generatorMessage.Text);
                 if (!string.IsNullOrWhiteSpace(code))
                 {
                     var targetDir = artifactDirectory ?? Path.Combine(Directory.GetCurrentDirectory(), "GeneratedProgram");
@@ -192,7 +293,7 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
                     var targetPath = Path.Combine(targetDir, "Program.cs");
                     File.WriteAllText(targetPath, code);
                     Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"?? Saved code to {targetPath}");
+                    Console.WriteLine($"-> Saved code to {targetPath}");
                     Console.ResetColor();
                 }
             }
@@ -200,8 +301,11 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         else
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("?? Workflow completed but execution may not have succeeded.");
+            Console.WriteLine("! Workflow completed but execution may not have succeeded.");
             Console.WriteLine($"Last agent: {finalMessage?.AuthorName}");
+            Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"Tool calls observed: CompileCode={ToolCallTracker.CompileCalls - compileBaseline}, ExecuteCode={ToolCallTracker.ExecuteCalls - executeBaseline}");
             Console.ResetColor();
         }
         break;
@@ -209,13 +313,13 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
 }
 
 Console.ForegroundColor = ConsoleColor.White;
-Console.WriteLine("\n?? Demo complete.");
+Console.WriteLine("\nDemo complete.");
 Console.ResetColor();
 
 static string? TryGetArtifactDirectory(IReadOnlyCollection<ChatMessage> history)
 {
     var compilerMessage = history.LastOrDefault(m =>
-        m.AuthorName == "CodeCompiler" && m.Text?.Contains("DLL_PATH:", StringComparison.OrdinalIgnoreCase) == true);
+        m.AuthorName == "CodeCompiler" && m.Text.Contains("DLL_PATH:", StringComparison.OrdinalIgnoreCase));
 
     if (compilerMessage?.Text is null)
     {

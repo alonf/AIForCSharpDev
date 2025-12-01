@@ -1,3 +1,4 @@
+using LocalOllamaAgent.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -37,7 +38,7 @@ Do NOT output JSON. Do NOT explain the tool call. Just use the tool.",
     /// <summary>
     /// Creates the Compiler agent - responsible for compiling code and providing feedback.
     /// </summary>
-    public static AIAgent CreateCompiler(IChatClient chatClient)
+     public static AIAgent CreateCompiler(IChatClient chatClient)
     {
         var compileTool = AIFunctionFactory.Create(CompilationTools.CompileCode);
         return chatClient.CreateAIAgent(
@@ -48,19 +49,25 @@ Your goal is to compile code using the `CompileCode` tool.
 Trigger: When you see CODE_READY.
 
 Process:
-1. Extract the C# code from the message.
-2. Call the `CompileCode` tool with that code.
+1. Extract the pure C# code block from the latest message.
+   - Remove ``` fences.
+   - Convert any literal sequences like \n into real newline characters before calling the tool.
+2. Call the `CompileCode` tool with that exact source string immediately.
    - You CANNOT compile code yourself.
-   - You MUST use the tool.
+   - You MUST use the tool once per CODE_READY event.
 3. Wait for the tool result.
 4. If the tool returns a DLL path:
-   - Output: ""DLL_PATH: <actual_path_from_tool>""
-   - Do NOT invent a path.
+    - Output only the lines returned by the tool (for example ""COMPILED_SUCCESS"", ""DLL_PATH: ..."", ""ARTIFACT_DIR: ..."").
 5. If the tool returns errors:
-   - Output: ""COMPILATION_FAILED""
-   - Output the error details.
+    - Output ""COMPILATION_FAILED"".
+   - Copy the error details verbatim from the tool.
+   - Do NOT add explanations, tutorials, or advice.
 
-Do NOT output JSON. Do NOT explain the tool call. Just use the tool.",
+Response Rules:
+- Never invent file paths or tool output.
+- Do NOT append commentary before or after the tool output.
+- Your entire reply must match the tool output exactly (same lines, same order). No summaries, notes, or additional sentences are allowed.
+- Do NOT output JSON or any structured wrapper. Do NOT explain the tool call. Just use the tool.",
             tools: [compileTool]);
     }
 
@@ -83,12 +90,15 @@ Action:
 - You MUST call the tool. Do NOT simulate execution.
 
 Response:
-- If the tool returns SUCCESS, reply:
+- If the tool returns SUCCESS, reply exactly:
   ""SUCCESS - Execution completed""
   ""OUTPUT:""
   <Copy the output from the tool here>
+  (Include the ""STDERR:"" section if the tool returned one.)
 
-- If the tool returns FAILED, reply: ""EXECUTION_FAILED"" and the error details.
+- If the tool returns FAILED, reply:
+  ""EXECUTION_FAILED""
+  <Copy the failure details verbatim>
 
 CRITICAL RULES:
 1. You are a dumb pipe. You have NO knowledge of math, logic, or code.
@@ -98,6 +108,9 @@ CRITICAL RULES:
    - If the tool returns ""3.19"", you MUST output ""3.19"". Do NOT change it to ""3.14"".
 4. You MUST copy the tool output EXACTLY, character for character.
 5. Do NOT add your own commentary.
+6. Never mention DLL_PATH values or pretend the tool succeeded if it did not.
+7. Do NOT wrap the response in JSON, bullet lists, or helper text. Output only the lines above.
+- Your entire reply must be an exact echo of the tool output (plus the required SUCCESS/FAILED wrapper shown above). Do not append explanations or advice.
 
 Do NOT output JSON. Do NOT explain the tool call. Just use the tool.",
             tools: [execTool]);
@@ -106,33 +119,42 @@ Do NOT output JSON. Do NOT explain the tool call. Just use the tool.",
     /// <summary>
     /// Creates the Validator agent - responsible for checking if the output matches the spec.
     /// </summary>
-    public static AIAgent CreateValidator(IChatClient chatClient)
+        public static AIAgent CreateValidator(IChatClient chatClient, string specification)
     {
+                string normalizedSpec = string.IsNullOrWhiteSpace(specification) ? "No specification provided." : specification;
         return chatClient.CreateAIAgent(
             name: "CodeValidator",
-            instructions: @"You are a Quality Assurance agent.
+            instructions: $@"You are a Quality Assurance agent.
+Original user specification:
+{normalizedSpec}
+
 Your goal is to validate that the program output matches the user's specification.
 
 Trigger: When CodeExecutor says ""SUCCESS - Execution completed"".
 
 Process:
-1. Identify the user's ""Specification"" from the chat history.
-2. Identify the ""OUTPUT"" provided by the CodeExecutor.
-3. Analyze the ""OUTPUT"" for correctness:
-    - CHECK THE VALUE: If the user asked for a known constant (like PI), does the output start with the correct digits (e.g. 3.14159...)?
-    - Does it answer the specific question asked?
-    - Does it follow formatting rules? (e.g., ""40 digits"")
-4. If the output is incorrect (wrong value, wrong format, or error message), you MUST reject it.
+0. Confirm required tools actually ran:
+   - Locate the most recent message from CodeCompiler. It MUST contain the `CompileCode` tool result (""COMPILED_SUCCESS""/""COMPILATION_FAILED"" plus the tool's payload). If it is missing, fabricated, or padded with commentary, reply ""VALIDATION_FAILED"" and ask CodeCompiler to call `CompileCode` now.
+   - Locate the most recent message from CodeExecutor. It MUST be a verbatim echo of the `ExecuteCode` tool response (""SUCCESS""/""FAILED"" block). If it is missing, fabricated, or contains commentary beyond the tool output, reply ""VALIDATION_FAILED"" and ask CodeExecutor to call `ExecuteCode` now.
+   - Do NOT proceed to value checks until both tool outputs are confirmed present.
+1. Re-read the specification and list the explicit requirements (values, formats, units, bounds, counts, success criteria).
+2. Retrieve the most recent ""OUTPUT"" section from CodeExecutor.
+3. Verify the OUTPUT against every requirement:
+   - Check that required constraints are satisfied (format, sign, magnitude, digit count, textual phrases, etc.).
+   - Reject outputs containing execution errors, placeholder text, missing data, or contradictions.
+   - If you cannot confidently confirm correctness, reject and request another attempt.
+4. When rejecting, explain the first concrete mismatch so the team can fix it.
 
 Response Format:
-- If correct: ""VALIDATION_SUCCESS""
+- If correct: ""VALIDATION_SUCCESS"".
 - If incorrect: ""VALIDATION_FAILED"" followed by a short explanation of why.
 
 CRITICAL:
-- If the output is ""93.69..."" for PI, REJECT IT.
-- If the output is ""3.14..."" but has garbage at the end, REJECT IT if precision was requested.
-- If the output is ""Hello World"" when a calculation was requested, REJECT IT.
-- Be strict. Do not hallucinate success.",
+- Reject any CodeCompiler message that is not a pure tool response (extra sentences, summaries, JSON, etc.).
+- Reject any CodeExecutor message that does not start with ""SUCCESS - Execution completed"" or ""EXECUTION_FAILED"" exactly, or that contains fabricated content.
+- Reject any response that contradicts the specification or lacks verified evidence.
+- Reject if the required tool outputs are missing, incomplete, or altered.
+- Be strict. Do not assume success without proof. If uncertain, reject and request a retry.",
             tools: []);
     }
 }

@@ -9,21 +9,15 @@ namespace EventLogMcp.Tools;
 /// MCP Tool class exposing Windows Event Log analysis as MCP tools.
 /// </summary>
 [McpServerToolType]
-public class EventLogTools
+public class EventLogTools(WindowsEventLogReader reader)
 {
-    private readonly WindowsEventLogReader _reader;
-
-    public EventLogTools(WindowsEventLogReader reader)
-    {
-        _reader = reader;
-    }
-
     [McpServerTool, Description("Retrieves system startup and shutdown events from Windows Event Log")]
+    // ReSharper disable UnusedMember.Global
     public async Task<string> GetStartupShutdownEvents(
         [Description("Number of days to look back (1-365)")] int days = 30)
     {
         days = Math.Clamp(days, 1, 365);
-        var events = await _reader.GetStartupShutdownEventsAsync(days);
+        var events = await reader.GetStartupShutdownEventsAsync(days);
         return JsonSerializer.Serialize(events, new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -36,8 +30,8 @@ public class EventLogTools
         [Description("Number of days to analyze (1-365)")] int days = 30)
     {
         days = Math.Clamp(days, 1, 365);
-        var events = await _reader.GetStartupShutdownEventsAsync(days);
-        var stats = _reader.CalculateUptime(events);
+        var events = await reader.GetStartupShutdownEventsAsync(days);
+        var stats = reader.CalculateUptime(events);
         return JsonSerializer.Serialize(stats, new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -50,24 +44,24 @@ public class EventLogTools
         [Description("Number of days to analyze (1-365)")] int days = 30)
     {
         days = Math.Clamp(days, 1, 365);
-        var events = await _reader.GetStartupShutdownEventsAsync(days);
-        var statistics = _reader.CalculateUptime(events);
+        var events = await reader.GetStartupShutdownEventsAsync(days);
+        var statistics = reader.CalculateUptime(events);
 
         var summary = new
         {
             AnalysisPeriod = $"Last {days} days",
             Statistics = new
             {
-                TotalUptimeHours = statistics.TotalUptimeHours,
+                statistics.TotalUptimeHours,
                 AverageDailyHours = statistics.AverageDailyUptimeHours,
                 DaysAnalyzed = statistics.DaysWithData,
-                StartupCount = statistics.StartupCount,
-                ShutdownCount = statistics.ShutdownCount
+                statistics.StartupCount,
+                statistics.ShutdownCount
             },
             DailyBreakdown = statistics.DailyBreakdown.Select(d => new
             {
                 Date = d.Date.ToString("yyyy-MM-dd"),
-                UptimeHours = d.UptimeHours,
+                d.UptimeHours,
                 EventCount = d.Events.Count,
                 Events = d.Events.Select(e => new { Time = e.Timestamp.ToString("HH:mm:ss"), Type = e.EventType })
             })

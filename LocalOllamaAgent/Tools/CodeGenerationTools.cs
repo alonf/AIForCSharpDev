@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace LocalOllamaAgent;
+namespace LocalOllamaAgent.Tools;
 
 /// <summary>
 /// Tools for code generation phase.

@@ -2,12 +2,11 @@
 
 using Azure.AI.OpenAI;
 using Azure.Identity;
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
-using OpenAI;
-using ModelContextProtocol.Client;
-using Spectre.Console;
 using ComputerUsageAgent.Visualization;
+using Microsoft.Agents.AI;
+using ModelContextProtocol.Client;
+using OpenAI;
+using Spectre.Console;
 
 // Display welcome banner
 AnsiConsole.Write(
@@ -77,7 +76,7 @@ When asked about computer usage:
 
 Be concise and helpful in your responses.",
             name: "ComputerUsageAnalyst",
-            tools: [.. mcpTools.Cast<AITool>()]);
+            tools: [.. mcpTools]);
 
     AnsiConsole.MarkupLine($"[green]✓ Agent '{agent.Name}' created successfully[/]");
     AnsiConsole.WriteLine();
@@ -89,13 +88,7 @@ Be concise and helpful in your responses.",
     var choice = AnsiConsole.Prompt(
         new SelectionPrompt<string>()
             .Title("Select an option:")
-            .AddChoices(new[]
-            {
-                "Show computer usage for last 30 days",
-                "Show computer usage for last 7 days",
-                "Show computer usage for custom period",
-                "Exit"
-            }));
+            .AddChoices("Show computer usage for last 30 days", "Show computer usage for last 7 days", "Show computer usage for custom period", "Exit"));
 
     if (choice != "Exit")
     {
@@ -106,7 +99,7 @@ Be concise and helpful in your responses.",
                 new TextPrompt<int>("Enter number of days:")
                     .DefaultValue(30)
                     .ValidationErrorMessage("[red]Please enter a valid number[/]")
-                    .Validate(d => d > 0 && d <= 365)),
+                    .Validate(d => d is > 0 and <= 365)),
             _ => 30
         };
 

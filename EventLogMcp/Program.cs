@@ -1,8 +1,5 @@
-using EventLogMcp.Models;
 using EventLogMcp.Services;
-using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Server;
-using System.Text.Json;
+using EventLogMcp.Tools;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +16,7 @@ builder.Services.AddSingleton<WindowsEventLogReader>();
 builder.Services
     .AddMcpServer()
     .WithHttpTransport(o => o.Stateless = true)
-    .WithTools<EventLogMcp.Tools.EventLogTools>();
+    .WithTools<EventLogTools>();
 
 var app = builder.Build();
 

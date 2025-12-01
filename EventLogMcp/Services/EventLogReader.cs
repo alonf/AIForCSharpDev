@@ -59,8 +59,7 @@ public class WindowsEventLogReader
         var eventLogQuery = new EventLogQuery(logName, PathType.LogName, query);
         using var reader = new EventLogReader(eventLogQuery);
 
-        EventRecord? eventRecord;
-        while ((eventRecord = reader.ReadEvent()) != null)
+        while (reader.ReadEvent() is { } eventRecord)
         {
             using (eventRecord)
             {
@@ -93,7 +92,7 @@ public class WindowsEventLogReader
     /// </summary>
     public UptimeStatistics CalculateUptime(List<StartupShutdownEvent> events)
     {
-        if (events == null || events.Count == 0)
+        if (events.Count == 0)
         {
             return new UptimeStatistics
             {

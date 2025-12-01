@@ -1,9 +1,10 @@
 ﻿using Azure.AI.OpenAI;
 using Azure.Identity;
-using Microsoft.Extensions.AI;
-using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore; // AG-UI protocol layer
 using JokeAgentsDemo;
+using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Hosting.AGUI.AspNetCore;
+using Microsoft.Extensions.AI;
+// AG-UI protocol layer
 
 
 var builder = WebApplication.CreateBuilder(args);

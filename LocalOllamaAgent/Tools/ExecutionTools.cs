@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
-namespace LocalOllamaAgent;
+namespace LocalOllamaAgent.Tools;
 
 /// <summary>
 /// Tools for code execution phase.
@@ -13,6 +13,7 @@ public static class ExecutionTools
     public static string ExecuteCode(
         [Description("Path to the compiled DLL to execute.")] string dllPath)
     {
+        ToolCallTracker.RegisterExecuteCall();
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"[TOOL] ExecuteCode invoked. DLL_PATH: {dllPath}");
         Console.ResetColor();
@@ -36,7 +37,7 @@ public static class ExecutionTools
             if (exitCode == -1)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[TOOL] ExecuteCode TIMEOUT");
+                Console.WriteLine("[TOOL] ExecuteCode TIMEOUT");
                 Console.ResetColor();
                 return $"FAILED\nERROR: Execution timeout ({timeoutMs / 1000.0:F1} seconds)\nOUTPUT:\n{stdout}";
             }
@@ -44,7 +45,7 @@ public static class ExecutionTools
             if (exitCode == 0)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[TOOL] ExecuteCode SUCCESS");
+                Console.WriteLine("[TOOL] ExecuteCode SUCCESS");
                 Console.WriteLine("=== APP OUTPUT BEGIN ===");
                 Console.WriteLine(stdout);
                 Console.WriteLine("=== APP OUTPUT END ===");
@@ -83,7 +84,10 @@ public static class ExecutionTools
                     Directory.Delete(tempDir, recursive: true);
                 }
             }
-            catch { }
+            catch
+            {
+                // ignored
+            }
         }
     }
 
@@ -116,7 +120,12 @@ public static class ExecutionTools
         {
             if (!p.WaitForExit(timeoutMs.Value))
             {
-                try { p.Kill(); } catch { }
+                try { p.Kill(); }
+                catch
+                {
+                    // ignored
+                }
+
                 return (-1, stdout, stderr + "\n<timeout>");
             }
         }

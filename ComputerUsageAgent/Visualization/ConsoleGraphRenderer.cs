@@ -1,5 +1,6 @@
-using Spectre.Console;
+using System.Globalization;
 using System.Text.RegularExpressions;
+using Spectre.Console;
 
 namespace ComputerUsageAgent.Visualization;
 
@@ -60,7 +61,7 @@ public static class ConsoleGraphRenderer
             {
                 var date = m.Groups["date"].Value;
                 var hoursRaw = m.Groups["hours"].Value.Replace(',', '.');
-                if (!double.TryParse(hoursRaw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var hours))
+                if (!double.TryParse(hoursRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out var hours))
                     continue;
 
                 // Preserve exact hours as printed

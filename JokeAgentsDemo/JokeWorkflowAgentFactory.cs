@@ -1,7 +1,7 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using System.Runtime.CompilerServices;
 
 namespace JokeAgentsDemo;
 
@@ -45,6 +45,7 @@ internal class JokeWorkflowChatClient : IChatClient
     private readonly ChatClientAgent _criticAgent;
     private readonly ILogger _logger;
 
+    // ReSharper disable once ConvertToPrimaryConstructor
     public JokeWorkflowChatClient(
         ChatClientAgent creatorAgent,
         ChatClientAgent criticAgent,
@@ -54,8 +55,6 @@ internal class JokeWorkflowChatClient : IChatClient
         _criticAgent = criticAgent;
         _logger = logger;
     }
-
-    public ChatClientMetadata Metadata => new("JokeWorkflow", new Uri("https://joke-workflow"));
 
     public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> chatMessages,
@@ -73,7 +72,7 @@ internal class JokeWorkflowChatClient : IChatClient
 
         // Execute workflow
         var messages = chatMessages.ToList();
-        StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages);
+        StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages, cancellationToken: cancellationToken);
         await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 
         // Collect all results
@@ -114,7 +113,7 @@ internal class JokeWorkflowChatClient : IChatClient
 
         // Execute workflow
         var messages = chatMessages.ToList();
-        StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages);
+        StreamingRun run = await InProcessExecution.StreamAsync(workflow, messages, cancellationToken: cancellationToken);
         await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 
         // Optional intro header (single chunk)
@@ -178,7 +177,7 @@ internal class JokeWorkflowChatClient : IChatClient
                 int finalRating = 0;
                 if (!string.IsNullOrEmpty(finalCritic?.Text))
                 {
-                    finalRating = JokeQualityManager.ExtractRating(finalCritic!.Text!);
+                    finalRating = JokeQualityManager.ExtractRating(finalCritic.Text);
                 }
 
                 if (!string.IsNullOrEmpty(finalCreator?.Text))

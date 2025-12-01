@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
-namespace LocalOllamaAgent;
+namespace LocalOllamaAgent.Tools;
 
 /// <summary>
 /// Tools for code compilation phase.
@@ -13,8 +13,9 @@ public static class CompilationTools
     public static string CompileCode(
         [Description("Full C# source code to compile.")] string code)
     {
+        ToolCallTracker.RegisterCompileCall();
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"[TOOL] CompileCode invoked. Source length: {code?.Length ?? 0} chars");
+        Console.WriteLine($"[TOOL] CompileCode invoked. Source length: {code.Length} chars");
         Console.ResetColor();
 
         string tempDir = Path.Combine(Path.GetTempPath(), "Compile_" + Guid.NewGuid().ToString("N"));
@@ -24,7 +25,8 @@ public static class CompilationTools
 
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "Program.cs"), code);
+            string normalizedCode = NormalizeSource(code);
+            File.WriteAllText(Path.Combine(tempDir, "Program.cs"), normalizedCode);
             File.WriteAllText(Path.Combine(tempDir, "App.csproj"),
                 "<Project Sdk=\"Microsoft.NET.Sdk\">" +
                 "<PropertyGroup>" +
@@ -92,7 +94,10 @@ public static class CompilationTools
                     Directory.Delete(tempDir, recursive: true);
                 }
             }
-            catch { }
+            catch
+            {
+                // ignored
+            }
         }
     }
 
@@ -110,6 +115,186 @@ public static class CompilationTools
             var dirName = Path.GetFileName(directory);
             CopyDirectory(directory, Path.Combine(destinationDir, dirName));
         }
+    }
+
+    private static string NormalizeSource(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        string code = raw.Trim();
+        code = StripCodeFence(code);
+        code = code.Replace("\r\n", "\n");
+
+        if (!code.Contains('\n') && code.Contains("\\n", StringComparison.Ordinal))
+        {
+            code = UnescapeStructuralNewlines(code);
+        }
+
+        return code;
+    }
+
+    private static string StripCodeFence(string code)
+    {
+        if (!code.StartsWith("```", StringComparison.Ordinal))
+        {
+            return code;
+        }
+
+        int firstNewLine = code.IndexOf('\n');
+        if (firstNewLine >= 0)
+        {
+            code = code[(firstNewLine + 1)..];
+        }
+
+        int closingFence = code.LastIndexOf("```", StringComparison.Ordinal);
+        if (closingFence >= 0)
+        {
+            code = code[..closingFence];
+        }
+
+        return code.Trim();
+    }
+
+    private static string UnescapeStructuralNewlines(string code)
+    {
+        var sb = new StringBuilder(code.Length);
+        bool inString = false;
+        bool inVerbatimString = false;
+        bool inChar = false;
+        bool escapeActive = false;
+
+        for (int i = 0; i < code.Length; i++)
+        {
+            char c = code[i];
+
+            if (inVerbatimString)
+            {
+                sb.Append(c);
+
+                if (c == '"' && i + 1 < code.Length && code[i + 1] == '"')
+                {
+                    sb.Append(code[i + 1]);
+                    i++;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    inVerbatimString = false;
+                }
+
+                continue;
+            }
+
+            if (inString)
+            {
+                sb.Append(c);
+
+                if (escapeActive)
+                {
+                    escapeActive = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escapeActive = true;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    inString = false;
+                }
+
+                continue;
+            }
+
+            if (inChar)
+            {
+                sb.Append(c);
+
+                if (escapeActive)
+                {
+                    escapeActive = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escapeActive = true;
+                    continue;
+                }
+
+                if (c == '\'')
+                {
+                    inChar = false;
+                }
+
+                continue;
+            }
+
+            if (c == '@' && i + 1 < code.Length && code[i + 1] == '"')
+            {
+                sb.Append(c);
+                inVerbatimString = true;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                sb.Append(c);
+                inString = true;
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                sb.Append(c);
+                inChar = true;
+                continue;
+            }
+
+            if (c == '\\' && i + 1 < code.Length)
+            {
+                char next = code[i + 1];
+
+                if (next == 'r' && i + 3 < code.Length && code[i + 2] == '\\' && code[i + 3] == 'n')
+                {
+                    sb.Append('\n');
+                    i += 3;
+                    continue;
+                }
+
+                if (next == 'n')
+                {
+                    sb.Append('\n');
+                    i++;
+                    continue;
+                }
+
+                if (next == 't')
+                {
+                    sb.Append('\t');
+                    i++;
+                    continue;
+                }
+
+                if (next == '\\')
+                {
+                    sb.Append('\\');
+                    i++;
+                    continue;
+                }
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     private static (int ExitCode, string StdOut, string StdErr) RunProcess(

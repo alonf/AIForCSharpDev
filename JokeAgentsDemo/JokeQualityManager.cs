@@ -1,7 +1,7 @@
-﻿using Microsoft.Agents.AI;
+﻿using System.Text.RegularExpressions;
+using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using System.Text.RegularExpressions;
 
 namespace JokeAgentsDemo;
 
@@ -29,7 +29,7 @@ public class JokeQualityManager : RoundRobinGroupChatManager
         
         if (lastMessage?.AuthorName == "JokeCritic")
         {
-            var messageText = lastMessage.Text ?? string.Empty;
+            var messageText = lastMessage.Text;
             
             _logger.LogInformation("Critic message: {Message}", messageText.Length > 200 ? messageText.Substring(0, 200) + "..." : messageText);
             
