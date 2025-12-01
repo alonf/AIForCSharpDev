@@ -4,36 +4,66 @@ using Microsoft.Extensions.AI;
 using OllamaSharp;
 using LocalOllamaAgent;
 using System.Text;
+using Azure.AI.OpenAI;
+using Azure.Identity;
 
-Console.WriteLine("=== Local Multi-Agent Code Demo (MAF + OllamaSharp) ===");
+Console.WriteLine("=== Multi-Agent Code Demo (MAF) ===");
 
-// Initialize Ollama runtime
-await OllamaRuntime.EnsureReadyAsync();
+// Select Model Type
+Console.WriteLine("Select Model Type:");
+Console.WriteLine("1. Local (Ollama - llama3.1:8b)");
+Console.WriteLine("2. Cloud (Azure OpenAI - Model Router)");
+Console.Write("Choice [1]: ");
+string? choice = Console.ReadLine()?.Trim();
+
+IChatClient chatClient;
+
+if (choice == "2")
+{
+    Console.WriteLine("Initializing Cloud Model (Azure OpenAI)...");
+    var endpoint = new Uri("https://alonlecturedemo-resource.cognitiveservices.azure.com/");
+    var credential = new DefaultAzureCredential();
+    string deploymentName = "model-router";
+
+    var azureClient = new AzureOpenAIClient(endpoint, credential);
+    chatClient = azureClient.GetChatClient(deploymentName).AsIChatClient();
+    Console.WriteLine("Cloud Model Ready.");
+}
+else
+{
+    Console.WriteLine("Initializing Local Model (Ollama)...");
+    // Initialize Ollama runtime
+    await OllamaRuntime.EnsureReadyAsync();
+    
+    chatClient = new OllamaApiClient(
+        new Uri($"http://localhost:{OllamaRuntime.Port}"),
+        OllamaRuntime.Model);
+    Console.WriteLine("Local Model Ready.");
+}
 
 // Get user specification
-Console.WriteLine("Enter a simple C# console app specification: ");
+Console.WriteLine("\nEnter a simple C# console app specification: ");
 string? spec = Console.ReadLine()?.Trim();
 if (string.IsNullOrWhiteSpace(spec)) spec = "print the first 10 squares";
 
 // Create agents with tools
-IChatClient ollamaClient = new OllamaApiClient(
-    new Uri($"http://localhost:{OllamaRuntime.Port}"),
-    OllamaRuntime.Model);
-
-var codeGeneratorAgent = AgentFactory.CreateCodeGenerator(ollamaClient);
-var compilerAgent = AgentFactory.CreateCompiler(ollamaClient);
-var executorAgent = AgentFactory.CreateExecutor(ollamaClient);
+var codeGeneratorAgent = AgentFactory.CreateCodeGenerator(chatClient);
+var compilerAgent = AgentFactory.CreateCompiler(chatClient);
+var executorAgent = AgentFactory.CreateExecutor(chatClient);
+var validatorAgent = AgentFactory.CreateValidator(chatClient);
 
 // Build and run workflow
 var workflow = AgentWorkflowBuilder
     .CreateGroupChatBuilderWith(agents => new CodeWorkflowManager(agents))
-    .AddParticipants(codeGeneratorAgent, compilerAgent, executorAgent)
+    .AddParticipants(codeGeneratorAgent, compilerAgent, executorAgent, validatorAgent)
     .Build();
 
 List<ChatMessage> initialMessages = new()
 {
+    new ChatMessage(ChatRole.System,
+        "You are a coordinated team (CodeGenerator, CodeCompiler, CodeExecutor, CodeValidator). Follow the workflow contract: generator produces code + CODE_READY, compiler compiles using tools, executor runs DLL_PATH results, validator checks output against spec."),
     new ChatMessage(ChatRole.User,
-        $"Specification: {spec}\n\nCodeGenerator: Please generate the code.")
+        $"Specification: {spec}\n\nCodeGenerator: Call GenerateCode(specification) once, then respond with the required ```csharp block followed by CODE_READY.")
 };
 
 StreamingRun run = await InProcessExecution.StreamAsync(workflow, initialMessages);
@@ -48,7 +78,8 @@ var agentColors = new Dictionary<string, ConsoleColor>
 {
     ["CodeGenerator"] = ConsoleColor.Cyan,
     ["CodeCompiler"] = ConsoleColor.Yellow,
-    ["CodeExecutor"] = ConsoleColor.Green
+    ["CodeExecutor"] = ConsoleColor.Green,
+    ["CodeValidator"] = ConsoleColor.Magenta
 };
 
 Console.WriteLine("\n=== Workflow Execution ===\n");
@@ -137,26 +168,31 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         Console.WriteLine("\n=== Workflow Complete ===\n");
         Console.ResetColor();
 
-        if (finalMessage?.AuthorName == "CodeExecutor" &&
-            finalMessage.Text?.Contains("SUCCESS", StringComparison.OrdinalIgnoreCase) == true)
+        if ((finalMessage?.AuthorName == "CodeValidator" &&
+             finalMessage.Text?.Contains("VALIDATION_SUCCESS", StringComparison.OrdinalIgnoreCase) == true) ||
+            (finalMessage?.AuthorName == "CodeExecutor" &&
+             finalMessage.Text?.Contains("SUCCESS", StringComparison.OrdinalIgnoreCase) == true))
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("? Code generation and execution completed successfully!");
+            Console.WriteLine("? Code generation, execution, and validation completed successfully!");
             Console.ResetColor();
 
             // Save generated code if available
-            var generatorMessage = history?.FirstOrDefault(m =>
+            var generatorMessage = history?.LastOrDefault(m =>
                 m.AuthorName == "CodeGenerator" && m.Text?.Contains("```") == true);
 
+            var artifactDirectory = history is null ? null : TryGetArtifactDirectory(history);
             if (generatorMessage != null)
             {
                 string code = CodeExtractor.Extract(generatorMessage.Text!);
                 if (!string.IsNullOrWhiteSpace(code))
                 {
-                    Directory.CreateDirectory("GeneratedProgram");
-                    File.WriteAllText(Path.Combine("GeneratedProgram", "Program.cs"), code);
+                    var targetDir = artifactDirectory ?? Path.Combine(Directory.GetCurrentDirectory(), "GeneratedProgram");
+                    Directory.CreateDirectory(targetDir);
+                    var targetPath = Path.Combine(targetDir, "Program.cs");
+                    File.WriteAllText(targetPath, code);
                     Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine("?? Saved code to GeneratedProgram/Program.cs");
+                    Console.WriteLine($"?? Saved code to {targetPath}");
                     Console.ResetColor();
                 }
             }
@@ -175,3 +211,25 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
 Console.ForegroundColor = ConsoleColor.White;
 Console.WriteLine("\n?? Demo complete.");
 Console.ResetColor();
+
+static string? TryGetArtifactDirectory(IReadOnlyCollection<ChatMessage> history)
+{
+    var compilerMessage = history.LastOrDefault(m =>
+        m.AuthorName == "CodeCompiler" && m.Text?.Contains("DLL_PATH:", StringComparison.OrdinalIgnoreCase) == true);
+
+    if (compilerMessage?.Text is null)
+    {
+        return null;
+    }
+
+    foreach (var line in compilerMessage.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        if (line.StartsWith("ARTIFACT_DIR:", StringComparison.OrdinalIgnoreCase))
+        {
+            var path = line.Substring("ARTIFACT_DIR:".Length).Trim();
+            return string.IsNullOrWhiteSpace(path) ? null : path;
+        }
+    }
+
+    return null;
+}

@@ -6,9 +6,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0-beta.2" />
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-preview.251125.1" />
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-preview.251125.1" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows.Declarative" Version="1.0.0-preview.251125.1" />
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.0.1" />
     <PackageReference Include="OllamaSharp" Version="5.4.11" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="GeneratedArtifacts\**" />
+    <Compile Remove="GeneratedProgram\**" />
+    <EmbeddedResource Remove="GeneratedArtifacts\**" />
+    <EmbeddedResource Remove="GeneratedProgram\**" />
+    <None Remove="GeneratedArtifacts\**" />
+    <None Remove="GeneratedProgram\**" />
   </ItemGroup>
 </Project>

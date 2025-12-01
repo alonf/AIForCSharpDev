@@ -6,8 +6,11 @@ public static class OllamaRuntime
 {
     public const string ContainerName = "ollama";
     public const string Image = "ollama/ollama:latest";
-    public const string Model = "llama3.1:8b";
+    public const string DefaultModel = "llama3.1:8b";
     public const int Port = 11434;
+
+    public static string Model =>
+        Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? DefaultModel;
 
     public static async Task EnsureReadyAsync()
     {

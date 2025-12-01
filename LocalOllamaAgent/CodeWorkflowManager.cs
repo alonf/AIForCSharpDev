@@ -21,12 +21,11 @@ public sealed class CodeWorkflowManager : RoundRobinGroupChatManager
     {
         var lastMessage = history.LastOrDefault();
         
-        // Terminate when CodeExecutor reports SUCCESS
-        if (lastMessage?.AuthorName == "CodeExecutor")
+        // Terminate when CodeValidator reports VALIDATION_SUCCESS
+        if (lastMessage?.AuthorName == "CodeValidator")
         {
             string? text = lastMessage.Text;
-            if (text?.Contains("SUCCESS", StringComparison.OrdinalIgnoreCase) == true &&
-                text?.Contains("Execution completed", StringComparison.OrdinalIgnoreCase) == true)
+            if (text?.Contains("VALIDATION_SUCCESS", StringComparison.OrdinalIgnoreCase) == true)
             {
                 return ValueTask.FromResult(true);
             }

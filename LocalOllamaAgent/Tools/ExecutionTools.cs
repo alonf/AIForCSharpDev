@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 
 namespace LocalOllamaAgent;
 
@@ -8,55 +9,72 @@ namespace LocalOllamaAgent;
 /// </summary>
 public static class ExecutionTools
 {
-    [Description("Execute compiled C# code and return execution results.")]
-    public static Dictionary<string, object?> ExecuteCode(
+    [Description("Execute compiled C# code and return execution results in a simple format.")]
+    public static string ExecuteCode(
         [Description("Path to the compiled DLL to execute.")] string dllPath)
     {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"[TOOL] ExecuteCode invoked. DLL_PATH: {dllPath}");
+        Console.ResetColor();
+
         if (!File.Exists(dllPath))
         {
-            return new Dictionary<string, object?>
-            {
-                ["success"] = false,
-                ["error"] = $"DLL not found at: {dllPath}",
-                ["output"] = null
-            };
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[TOOL] ExecuteCode FAILED: DLL not found at {dllPath}");
+            Console.ResetColor();
+            return $"FAILED\nERROR: DLL not found at: {dllPath}";
         }
+
+        int timeoutMs = GetTimeout();
 
         try
         {
-            var (exitCode, stdout, stderr) = RunProcess("dotnet", $"\"{dllPath}\"", 
-                workingDir: Path.GetDirectoryName(dllPath), 
-                timeoutMs: 5000);
-
-            bool success = exitCode == 0;
-            string output = stdout;
-            
-            if (!string.IsNullOrWhiteSpace(stderr))
-            {
-                output += "\n[STDERR]\n" + stderr;
-            }
+            var (exitCode, stdout, stderr) = RunProcess("dotnet", $"\"{dllPath}\"",
+                workingDir: Path.GetDirectoryName(dllPath),
+                timeoutMs: timeoutMs);
 
             if (exitCode == -1)
             {
-                return new Dictionary<string, object?>
-                {
-                    ["success"] = false,
-                    ["error"] = "Execution timeout (5 seconds)",
-                    ["output"] = output
-                };
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[TOOL] ExecuteCode TIMEOUT");
+                Console.ResetColor();
+                return $"FAILED\nERROR: Execution timeout ({timeoutMs / 1000.0:F1} seconds)\nOUTPUT:\n{stdout}";
             }
 
-            return new Dictionary<string, object?>
+            if (exitCode == 0)
             {
-                ["success"] = success,
-                ["exitCode"] = exitCode,
-                ["output"] = output,
-                ["error"] = success ? null : "Non-zero exit code"
-            };
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[TOOL] ExecuteCode SUCCESS");
+                Console.WriteLine("=== APP OUTPUT BEGIN ===");
+                Console.WriteLine(stdout);
+                Console.WriteLine("=== APP OUTPUT END ===");
+                Console.ResetColor();
+                var sb = new StringBuilder();
+                sb.AppendLine("SUCCESS");
+                sb.AppendLine("OUTPUT:");
+                sb.AppendLine(stdout);
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    sb.AppendLine("STDERR:");
+                    sb.AppendLine(stderr);
+                }
+                return sb.ToString();
+            }
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[TOOL] ExecuteCode FAILED: ExitCode {exitCode}");
+            Console.ResetColor();
+            return $"FAILED\nERROR: Program exited with code {exitCode}\nOUTPUT:\n{stdout}\n{(string.IsNullOrWhiteSpace(stderr) ? string.Empty : "STDERR:\n" + stderr)}";
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[TOOL] ExecuteCode EXCEPTION: {ex.Message}");
+            Console.ResetColor();
+            return $"FAILED\nERROR: Exception during execution: {ex.Message}";
         }
         finally
         {
-            // Cleanup temp directory
             try
             {
                 var tempDir = Path.GetDirectoryName(dllPath);
@@ -65,8 +83,18 @@ public static class ExecutionTools
                     Directory.Delete(tempDir, recursive: true);
                 }
             }
-            catch { /* Ignore cleanup errors */ }
+            catch { }
         }
+    }
+
+    private static int GetTimeout()
+    {
+        if (int.TryParse(Environment.GetEnvironmentVariable("EXECUTION_TIMEOUT_MS"), out var value) && value > 0)
+        {
+            return value;
+        }
+
+        return 8000;
     }
 
     private static (int ExitCode, string StdOut, string StdErr) RunProcess(
