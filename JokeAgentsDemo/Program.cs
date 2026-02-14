@@ -52,7 +52,7 @@ app.UseStaticFiles();
 // ============================================================================
 
 // Create JokeCreator Agent  
-ChatClientAgent creatorAgent = new(chatClient, new ChatClientAgentOptions(
+ChatClientAgent creatorAgent = new(chatClient,
     instructions: @"You are a creative comedian named JokeCreator.
 
 Your task is to create original, funny jokes and improve them based on feedback.
@@ -80,14 +80,12 @@ When improving jokes based on feedback:
 - Try different approaches if the current format isn't working
 
 RESPONSE FORMAT:
-Just return the joke text - clean, simple, ready to perform. Nothing else.")
-{
-    Name = "JokeCreator",
-    Description = "Creates and improves jokes based on feedback"
-});
+Just return the joke text - clean, simple, ready to perform. Nothing else.",
+    name: "JokeCreator",
+    description: "Creates and improves jokes based on feedback");
 
 // Create JokeCritic Agent
-ChatClientAgent criticAgent = new(chatClient, new ChatClientAgentOptions(
+ChatClientAgent criticAgent = new(chatClient,
     instructions: @"You are a STRICT professional comedy critic named JokeCritic.
 
 Your role is to evaluate jokes with HIGH STANDARDS and provide tough but constructive feedback.
@@ -145,11 +143,9 @@ CRITICAL RULE ABOUT APPROVAL:
 - Do NOT say 'APPROVED' or 'APPROVED' anywhere in your response if rating < 8
 - ONLY use the word 'APPROVED' if rating is 8, 9, or 10
 - If rating is 7 or lower: DO NOT APPROVE under any circumstances
-- The word 'APPROVED' should ONLY appear when joke truly deserves 8+ rating")
-{
-    Name = "JokeCritic",
-    Description = "Strict comedy critic who demands short, punchy, memorable jokes"
-});
+- The word 'APPROVED' should ONLY appear when joke truly deserves 8+ rating",
+    name: "JokeCritic",
+    description: "Strict comedy critic who demands short, punchy, memorable jokes");
 
 // ============================================================================
 // MAP AGENTS TO A2A ENDPOINTS

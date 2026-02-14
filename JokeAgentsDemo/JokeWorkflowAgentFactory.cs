@@ -27,10 +27,10 @@ public static class JokeWorkflowAgentFactory
         // Wrap it in a ChatClientAgent for AG-UI compatibility
         return new ChatClientAgent(
             workflowChatClient,
-            new ChatClientAgentOptions("Creates jokes using iterative group chat workflow")
+            new ChatClientAgentOptions
             {
                 Name = "JokeWorkflow",
-                Description = "Joke creation workflow with quality gate (AG-UI enabled)"
+                Description = "Creates jokes using iterative group chat workflow"
             }
         );
     }
@@ -79,9 +79,9 @@ internal class JokeWorkflowChatClient : IChatClient
         List<ChatMessage> results = new();
         await foreach (WorkflowEvent evt in run.WatchStreamAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (evt is AgentRunUpdateEvent update)
+            if (evt is AgentResponseEvent update)
             {
-                var response = update.AsResponse();
+                var response = update.Response;
                 results.AddRange(response.Messages);
             }
             else if (evt is WorkflowOutputEvent output)
@@ -128,13 +128,11 @@ internal class JokeWorkflowChatClient : IChatClient
 
         await foreach (WorkflowEvent evt in run.WatchStreamAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (evt is AgentRunUpdateEvent update)
+            if (evt is AgentResponseUpdateEvent update)
             {
-                var response = update.AsResponse();
-                var msg = response.Messages.LastOrDefault();
-                var chunk = response.Text; // passthrough text chunk from workflow
+                var chunk = update.Update.Text;
+                var author = update.Update.AuthorName;
 
-                var author = msg?.AuthorName;
                 if (!string.IsNullOrEmpty(author) && author != currentAuthor)
                 {
                     if (author == "JokeCreator")

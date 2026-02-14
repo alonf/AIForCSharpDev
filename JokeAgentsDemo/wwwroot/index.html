@@ -248,7 +248,19 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-        
+
+        button.creating {
+            background: linear-gradient(270deg, #667eea, #764ba2, #667eea);
+            background-size: 200% 200%;
+            animation: gradientShift 2s ease infinite;
+        }
+
+        @keyframes gradientShift {
+            0%   { background-position: 0% 50%; }
+            50%  { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
         /* Architecture Panel */
         .architecture {
             background: #f8f9fa;
@@ -404,8 +416,8 @@
                             <p>Group chat orchestration with quality gate</p>
                         </div>
                         <div class="arch-layer">
-                            <h3>3&#xFE0F;&#x20E3; A2A Communication</h3>
-                            <p>Creator &#x2194;&#xFE0F; Critic collaboration via Agent-to-Agent protocol</p>
+                            <h3>3&#xFE0F;&#x20E3; A2A Endpoints</h3>
+                            <p>Creator &amp; Critic exposed via A2A for external reuse</p>
                         </div>
                     </div>
                 </div>
@@ -445,7 +457,11 @@
         let allCriticFeedback = [];
         let currentAgent = null;
         let currentContent = '';
-        
+        let currentAgentContent = '';
+        let iteration = 0;
+        let currentMessageDiv = null;
+        let lastRating = 0;
+
         async function createJoke() {
             const topic = document.getElementById('topicInput').value.trim() || 'general';
             const button = document.getElementById('createButton');
@@ -453,7 +469,7 @@
             const statusIndicator = document.getElementById('statusIndicator');
             const statusText = document.getElementById('statusText');
             const finalResultDiv = document.getElementById('finalResult');
-            
+
             // Reset state
             container.innerHTML = '';
             finalResultDiv.style.display = 'none';
@@ -462,17 +478,22 @@
             allCriticFeedback = [];
             currentAgent = null;
             currentContent = '';
+            currentAgentContent = '';
+            iteration = 0;
+            currentMessageDiv = null;
+            lastRating = 0;
             updateStats(0, '-');
-            
-            // Disable button
+
+            // Disable button with animated dots
             button.disabled = true;
+            button.classList.add('creating');
             button.innerHTML = '&#x231B; Creating...';
             statusIndicator.className = 'status-indicator active';
             statusText.textContent = 'Connecting to AG-UI workflow...';
-            
+
             // Add user message
             addMessage('user', 'You', `Create a funny joke about: ${topic}`);
-            
+
             try {
                 const response = await fetch('/agui/jokes', {
                     method: 'POST',
@@ -489,7 +510,7 @@
                 }
 
                 statusText.textContent = 'Streaming response from agents...';
-                
+
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
@@ -504,31 +525,16 @@
 
                     for (const line of lines) {
                         if (!line.startsWith('data: ')) continue;
-                        
+
                         try {
                             const data = JSON.parse(line.substring(6));
-                            
-                            console.log('Received SSE event:', data.type, 'Delta:', data.delta?.substring(0, 50));
-                            
+
                             if (data.type === 'TEXT_MESSAGE_CONTENT' && data.delta) {
-                                // Just accumulate - AG-UI handles message boundaries
-                                currentContent += data.delta;
-                                
-                                // Infer agent and display
-                                currentAgent = inferAgentFromContent(currentContent);
-                                if (currentAgent) {
-                                    updateOrCreateMessage(currentAgent, currentContent);
-                                }
-                                
+                                handleStreamDelta(data.delta);
+
                             } else if (data.type === 'RUN_FINISHED') {
-                                console.log('RUN_FINISHED received, content:', currentContent);
-                                
-                                // Finalize the message
-                                if (currentAgent && currentContent.trim()) {
-                                    finalizeAgentMessage(currentAgent, currentContent.trim());
-                                }
-                                
-                                // Show final result
+                                // Flush last agent content
+                                flushCurrentAgent();
                                 showFinalResults();
                             }
                         } catch (e) {
@@ -539,7 +545,7 @@
 
                 statusIndicator.className = 'status-indicator';
                 statusText.textContent = '\u2705 Joke creation complete!';
-                
+
             } catch (error) {
                 console.error('Error:', error);
                 statusIndicator.className = 'status-indicator error';
@@ -547,144 +553,112 @@
                 addMessage('system', 'System', `Error: ${error.message}`);
             } finally {
                 button.disabled = false;
+                button.classList.remove('creating');
                 button.innerHTML = '&#x1F680; Create Another Joke';
             }
         }
-        
-        function inferAgentFromContent(content) {
-            // Look for critic-specific patterns
-            const criticPatterns = ['Rating:', 'Feedback:', 'Sentence Count:', 'Tell Time:', 
-                                   'Strengths:', 'Improvements:', 'APPROVED'];
-            
-            for (const pattern of criticPatterns) {
-                if (content.includes(pattern)) {
-                    return 'critic';
-                }
-            }
-            
-            return 'creator';
-        }
-        
-        function finalizeAgentMessage(agent, content) {
-            const trimmed = content.trim();
-            
-            if (!trimmed) return; // Skip empty messages
-            
-            if (agent === 'creator') {
-                // This is a joke from JokeCreator
-                allJokes.push(trimmed);
-                console.log(`Stored joke #${allJokes.length}:`, trimmed.substring(0, 50));
-            } else if (agent === 'critic') {
-                // This is feedback from JokeCritic
-                allCriticFeedback.push(trimmed);
-                console.log(`Stored critic feedback #${allCriticFeedback.length}`);
-                
-                // Update stats with this iteration
-                const rating = extractRating(trimmed);
-                const iterations = allJokes.length;
-                updateStats(iterations, rating);
-            }
-        }
-        
-        function showFinalResults() {
-            // Parse the complete conversation text to extract jokes and ratings
-            const lines = currentContent.split('\n');
-            let currentIteration = 0;
-            let currentJoke = '';
-            let currentCriticFeedback = '';
-            let inJoke = false;
-            let inCritic = false;
-            
-            for (const line of lines) {
-                if (line.includes('Iteration') && line.includes('JokeCreator:')) {
-                    if (currentJoke) {
-                        allJokes.push(currentJoke.trim());
-                    }
-                    currentJoke = '';
-                    inJoke = true;
-                    inCritic = false;
-                    currentIteration++;
-                } else if (line.includes('Iteration') && line.includes('JokeCritic:')) {
-                    if (currentJoke) {
-                        allJokes.push(currentJoke.trim());
-                        currentJoke = '';
-                    }
-                    if (currentCriticFeedback) {
-                        allCriticFeedback.push(currentCriticFeedback.trim());
-                    }
-                    currentCriticFeedback = '';
-                    inJoke = false;
-                    inCritic = true;
-                } else if (line === '---' || line.includes('FINAL APPROVED JOKE:')) {
-                    if (currentCriticFeedback) {
-                        allCriticFeedback.push(currentCriticFeedback.trim());
-                        currentCriticFeedback = '';
-                    }
-                    inJoke = false;
-                    inCritic = false;
-                } else if (inJoke && line.trim()) {
-                    currentJoke += line + '\n';
-                } else if (inCritic && line.trim()) {
-                    currentCriticFeedback += line + '\n';
-                }
-            }
-            
-            // Add any remaining content
-            if (currentJoke) {
-                allJokes.push(currentJoke.trim());
-            }
-            if (currentCriticFeedback) {
-                allCriticFeedback.push(currentCriticFeedback.trim());
-            }
-            
-            console.log('Parsed jokes:', allJokes.length);
-            console.log('Parsed feedback:', allCriticFeedback.length);
-            
-            if (allJokes.length === 0) {
-                console.error('No jokes found in conversation');
+
+        function handleStreamDelta(delta) {
+            currentContent += delta;
+
+            // Detect agent change from the delta (markers arrive as complete deltas)
+            if (delta.includes('JokeCreator:')) {
+                flushCurrentAgent();
+                iteration++;
+                currentAgent = 'creator';
+                currentAgentContent = '';
+                createAgentMessageBubble('creator', 'JokeCreator');
+                updateStats(iteration, lastRating);
                 return;
             }
-            
-            // Get the last joke and its rating
-            const finalJoke = allJokes[allJokes.length - 1];
-            const finalFeedback = allCriticFeedback[allCriticFeedback.length - 1] || '';
-            const finalRating = extractRating(finalFeedback);
-            const iterations = allJokes.length;
-            
-            console.log('Final Results:', { finalJoke, finalRating, iterations });
-            
-            // Show the final result box
-            showFinalResult(finalJoke, finalRating, iterations);
-            
-            // Update stats one last time
-            updateStats(iterations, finalRating);
-        }
-        
-        function updateOrCreateMessage(agent, content) {
-            const container = document.getElementById('chatContainer');
-            let messageDiv = container.querySelector(`.message.${agent}:last-child`);
-            
-            if (!messageDiv) {
-                const agentName = agent === 'creator' ? 'JokeCreator' : 'JokeCritic';
-                const avatar = agent === 'creator' ? '\uD83E\uDD16' : '\uD83C\uDFAF';
-                
-                messageDiv = document.createElement('div');
-                messageDiv.className = `message ${agent}`;
-                messageDiv.innerHTML = `
-                    <div class="message-header">
-                        <div class="agent-avatar avatar-${agent}">${avatar}</div>
-                        <div class="agent-name">${agentName}</div>
-                    </div>
-                    <div class="message-content"></div>
-                `;
-                container.appendChild(messageDiv);
+
+            if (delta.includes('JokeCritic:')) {
+                flushCurrentAgent();
+                currentAgent = 'critic';
+                currentAgentContent = '';
+                createAgentMessageBubble('critic', 'JokeCritic');
+                return;
             }
-            
-            const contentDiv = messageDiv.querySelector('.message-content');
-            contentDiv.textContent = content;
+
+            // Detect final section - stop streaming into agent bubbles
+            if (delta.includes('FINAL APPROVED JOKE:') || delta.includes('---')) {
+                flushCurrentAgent();
+                currentAgent = null;
+                return;
+            }
+
+            // Skip intro header
+            if (delta.includes('Joke Creation Workflow')) {
+                return;
+            }
+
+            // Stream content into current agent's bubble
+            if (currentAgent && currentMessageDiv) {
+                currentAgentContent += delta;
+                const contentDiv = currentMessageDiv.querySelector('.message-content');
+                if (contentDiv) {
+                    contentDiv.innerHTML = renderMarkdown(currentAgentContent);
+                    document.getElementById('chatContainer').scrollTop = 
+                        document.getElementById('chatContainer').scrollHeight;
+                }
+
+                // Try to extract rating from critic content as it streams
+                if (currentAgent === 'critic') {
+                    const rating = extractRating(currentAgentContent);
+                    if (rating > 0) {
+                        lastRating = rating;
+                        updateStats(iteration, lastRating);
+                    }
+                }
+            }
+        }
+
+        function flushCurrentAgent() {
+            if (!currentAgent || !currentAgentContent.trim()) return;
+
+            if (currentAgent === 'creator') {
+                allJokes.push(currentAgentContent.trim());
+            } else if (currentAgent === 'critic') {
+                allCriticFeedback.push(currentAgentContent.trim());
+                const rating = extractRating(currentAgentContent);
+                if (rating > 0) {
+                    lastRating = rating;
+                    updateStats(iteration, lastRating);
+                }
+            }
+        }
+
+        function createAgentMessageBubble(agent, agentName) {
+            const container = document.getElementById('chatContainer');
+            const avatar = agent === 'creator' ? '\uD83E\uDD16' : '\uD83C\uDFAF';
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${agent}`;
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="agent-avatar avatar-${agent}">${avatar}</div>
+                    <div class="agent-name">${agentName}</div>
+                </div>
+                <div class="message-content"></div>
+            `;
+            container.appendChild(messageDiv);
+            currentMessageDiv = messageDiv;
             container.scrollTop = container.scrollHeight;
         }
-        
+
+        function showFinalResults() {
+            // Get the last joke and its rating
+            const finalJoke = allJokes.length > 0 ? allJokes[allJokes.length - 1] : '';
+            const finalRating = lastRating;
+            const finalIterations = Math.max(iteration, 1);
+
+            if (finalJoke) {
+                showFinalResult(finalJoke, finalRating, finalIterations);
+            }
+
+            updateStats(finalIterations, finalRating);
+        }
+
         function addMessage(type, name, content) {
             const container = document.getElementById('chatContainer');
             const avatarMap = {
@@ -693,7 +667,7 @@
                 'critic': '\uD83C\uDFAF',
                 'system': '\u2139\uFE0F'
             };
-            
+
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
             messageDiv.innerHTML = `
@@ -705,16 +679,31 @@
             `;
             container.appendChild(messageDiv);
             container.scrollTop = container.scrollHeight;
-            
+
             currentMessages.push({ type, name, content });
         }
-        
+
         function extractRating(text) {
             if (!text) return 0;
-            const match = text.match(/Rating:\s*(\d+)/i);
+            // Match "Rating: 8/10" or "Rating: 8"
+            const match = text.match(/Rating:\s*(\d+)\s*(?:\/\s*10)?/i);
             return match ? parseInt(match[1]) : 0;
         }
-        
+
+        function renderMarkdown(text) {
+            // Simple markdown rendering
+            let html = escapeHtml(text);
+            // Bold: **text**
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // Italic: *text*
+            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            // Line breaks
+            html = html.replace(/\n/g, '<br>');
+            // Bullet lists: - item
+            html = html.replace(/^- (.+)/gm, '&bull; $1');
+            return html;
+        }
+
         function showFinalResult(joke, rating, iterations) {
             const finalResultDiv = document.getElementById('finalResult');
             finalResultDiv.className = 'final-result';
@@ -724,16 +713,17 @@
                 <div class="joke-text">"${escapeHtml(joke)}"</div>
                 <span class="rating-badge">\u2B50 ${rating}/10 - Approved in ${iterations} iteration(s)</span>
             `;
-            
+
             // Scroll to show it
             finalResultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
-        
+
         function updateStats(iterations, rating) {
             document.getElementById('iterationCount').textContent = iterations;
-            document.getElementById('finalRating').textContent = rating > 0 ? `${rating}/10` : '-';
+            document.getElementById('finalRating').textContent = 
+                (typeof rating === 'number' && rating > 0) ? `${rating}/10` : '-';
         }
-        
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;

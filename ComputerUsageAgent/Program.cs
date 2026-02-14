@@ -4,6 +4,7 @@ using Azure.AI.OpenAI;
 using Azure.Identity;
 using ComputerUsageAgent.Visualization;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using ModelContextProtocol.Client;
 using OpenAI;
 using Spectre.Console;
@@ -58,10 +59,11 @@ try
     });
 
     // Create AI Agent with MCP tools (after status)
-    AIAgent agent = new AzureOpenAIClient(endpoint, credential)
-        .GetChatClient(deploymentName)
-        .CreateAIAgent(
-            instructions: @"You are a helpful computer usage analysis assistant.
+    ChatClientAgent agent = new(
+        new AzureOpenAIClient(endpoint, credential)
+            .GetChatClient(deploymentName)
+            .AsIChatClient(),
+        instructions: @"You are a helpful computer usage analysis assistant.
 You have access to Windows Event Log tools through the EventLog MCP server.
 
 Available tools:
@@ -75,8 +77,8 @@ When asked about computer usage:
 3. Present findings in a clear, structured format with a compact day-by-day list of 'YYYY-MM-DD: <hours> hours'.
 
 Be concise and helpful in your responses.",
-            name: "ComputerUsageAnalyst",
-            tools: [.. mcpTools]);
+        name: "ComputerUsageAnalyst",
+        tools: [.. mcpTools]);
 
     AnsiConsole.MarkupLine($"[green]✓ Agent '{agent.Name}' created successfully[/]");
     AnsiConsole.WriteLine();
