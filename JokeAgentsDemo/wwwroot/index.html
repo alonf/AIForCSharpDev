@@ -708,10 +708,17 @@
             const finalResultDiv = document.getElementById('finalResult');
             finalResultDiv.className = 'final-result';
             finalResultDiv.style.display = 'block';
+
+            const qualityPassed = rating >= 8;
+            const statusEmoji = qualityPassed ? '\u2705' : '\u26A0\uFE0F';
+            const statusText = qualityPassed 
+                ? `Approved in ${iterations} iteration(s)` 
+                : `Best result after ${iterations} iteration(s) (needs 8/10)`;
+
             finalResultDiv.innerHTML = `
                 <h3>\uD83C\uDF89 Final Result</h3>
                 <div class="joke-text">"${escapeHtml(joke)}"</div>
-                <span class="rating-badge">\u2B50 ${rating}/10 - Approved in ${iterations} iteration(s)</span>
+                <span class="rating-badge">${statusEmoji} ${rating}/10 - ${statusText}</span>
             `;
 
             // Scroll to show it

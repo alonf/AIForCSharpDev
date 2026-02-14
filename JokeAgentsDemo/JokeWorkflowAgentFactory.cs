@@ -180,9 +180,15 @@ internal class JokeWorkflowChatClient : IChatClient
 
                 if (!string.IsNullOrEmpty(finalCreator?.Text))
                 {
+                    var qualityPassed = finalRating >= 8;
+                    var statusEmoji = qualityPassed ? "\u2705" : "\u26A0\uFE0F";
+                    var statusText = qualityPassed
+                        ? $"Approved after {Math.Max(iteration, 1)} iteration(s)"
+                        : $"Best result after {Math.Max(iteration, 1)} iteration(s) (quality gate requires 8/10)";
+
                     yield return new ChatResponseUpdate
                     {
-                        Contents = [new TextContent($"\n\n---\n\n\U0001F389 FINAL APPROVED JOKE:\n{finalCreator!.Text}\n\n\u2705 Approved after {Math.Max(iteration, 1)} iteration(s)\n\u2B50 Final Rating: {finalRating}/10\n")],
+                        Contents = [new TextContent($"\n\n---\n\n\U0001F389 FINAL RESULT:\n{finalCreator!.Text}\n\n{statusEmoji} {statusText}\n\u2B50 Final Rating: {finalRating}/10\n")],
                         Role = ChatRole.Assistant
                     };
                 }

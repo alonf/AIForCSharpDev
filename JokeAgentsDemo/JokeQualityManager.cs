@@ -6,17 +6,19 @@ using Microsoft.Extensions.AI;
 namespace JokeAgentsDemo;
 
 /// <summary>
-/// Custom Group Chat Manager with quality gate for joke rating
+/// Custom Group Chat Manager with quality gate for joke rating.
+/// Follows the same explicit-check pattern as CodeWorkflowManager.
 /// </summary>
 public class JokeQualityManager : RoundRobinGroupChatManager
 {
+    private const int MaxRounds = 10;
     private readonly ILogger _logger;
-    
+
     public JokeQualityManager(IReadOnlyList<AIAgent> agents, ILogger logger) 
         : base(agents)
     {
-        MaximumIterationCount = 5;  // Safety limit
         _logger = logger;
+        _logger.LogWarning("JokeQualityManager v4 loaded — MaxRounds={MaxRounds}, no base.ShouldTerminate call", MaxRounds);
     }
 
     protected override ValueTask<bool> ShouldTerminateAsync(
@@ -24,64 +26,80 @@ public class JokeQualityManager : RoundRobinGroupChatManager
         CancellationToken cancellationToken = default)
     {
         var lastMessage = history.LastOrDefault();
-        
-        _logger.LogInformation("Checking termination. Last message from: {Author}", lastMessage?.AuthorName ?? "null");
-        
+        var authorName = lastMessage?.AuthorName ?? "null";
+
+        // Count actual rounds by counting critic responses (immune to message-count inflation)
+        var criticCount = history.Count(m => m.AuthorName == "JokeCritic");
+
+        _logger.LogInformation(
+            "ShouldTerminate — {Count} messages, {CriticCount} critic responses, last author: {Author}",
+            history.Count, criticCount, authorName);
+
+        // Quality gate: only check after the critic speaks
         if (lastMessage?.AuthorName == "JokeCritic")
         {
-            var messageText = lastMessage.Text;
-            
-            _logger.LogInformation("Critic message: {Message}", messageText.Length > 200 ? messageText.Substring(0, 200) + "..." : messageText);
-            
-            // Try to extract rating first
+            var messageText = lastMessage.Text ?? string.Empty;
+
+            _logger.LogInformation("Critic response (first 300 chars): {Message}",
+                messageText.Length > 300 ? messageText[..300] + "..." : messageText);
+
             var rating = ExtractRating(messageText);
-            _logger.LogInformation("Extracted rating: {Rating}", rating);
-            
-            // Only terminate if rating is 8 or higher
+            _logger.LogInformation("Extracted overall rating: {Rating}/10", rating);
+
             if (rating >= 8)
             {
-                _logger.LogInformation("✅ Joke rated {Rating}/10 - Quality threshold met!", rating);
+                _logger.LogInformation("✅ Quality gate PASSED — {Rating}/10. Terminating.", rating);
                 return ValueTask.FromResult(true);
             }
-            
-            // REMOVED: The fallback "APPROVED" check that allowed 6/10 jokes to pass
-            // The critic sometimes says "APPROVED" even when rating < 8, which is a mistake
-            // We should ONLY trust the numeric rating
-            
-            _logger.LogInformation("⚠️ Joke rated {Rating}/10 - Needs improvement", rating);
+
+            if (rating == 0)
+            {
+                _logger.LogWarning("⚠️ Could not parse rating from critic. Continuing.");
+            }
+            else
+            {
+                _logger.LogInformation("⚠️ Rating {Rating}/10 < 8 — needs improvement.", rating);
+            }
         }
-        
+
+        // Safety net: terminate after MaxRounds critic evaluations
+        if (criticCount >= MaxRounds)
+        {
+            _logger.LogWarning("🛑 Max rounds ({MaxRounds}) reached after {CriticCount} critic responses. Terminating.",
+                MaxRounds, criticCount);
+            return ValueTask.FromResult(true);
+        }
+
         return ValueTask.FromResult(false);
     }
     
     /// <summary>
-    /// Extracts rating from critic's response text
+    /// Extracts the overall rating from critic's response text.
+    /// Handles markdown formatting (e.g., **Rating:** 5/10, ## Rating: 5/10).
+    /// Only matches the overall "Rating:" line, never sub-category scores.
     /// </summary>
     public static int ExtractRating(string text)
     {
         if (string.IsNullOrEmpty(text)) return 0;
-        
-        // Try to find "Rating: X/10" pattern (most specific)
-        var match = Regex.Match(text, @"Rating:\s*(\d+)/10", RegexOptions.IgnoreCase);
+
+        // Strip markdown bold/italic markers so "**Rating:**" becomes "Rating:"
+        var cleaned = Regex.Replace(text, @"[*_]{1,3}", "");
+
+        // Match "Rating: X/10" at the start of a line, allowing optional leading whitespace and markdown headers.
+        // The anchor ensures we don't accidentally match sub-category lines like "Two-Story Gap: 8/10".
+        var match = Regex.Match(cleaned, @"^\s*(?:#{1,3}\s*)?Rating:\s*(\d+)\s*/\s*10", RegexOptions.IgnoreCase | RegexOptions.Multiline);
         if (match.Success && int.TryParse(match.Groups[1].Value, out int rating))
         {
             return rating;
         }
-        
-        // Try "Overall Rating: X/10" or "Overall: X/10"
-        match = Regex.Match(text, @"Overall\s*(?:Rating)?:\s*(\d+)/10", RegexOptions.IgnoreCase);
+
+        // Try "Overall Rating: X/10" or "Overall: X/10" anywhere
+        match = Regex.Match(cleaned, @"Overall\s*(?:Rating)?\s*:\s*(\d+)\s*/\s*10", RegexOptions.IgnoreCase);
         if (match.Success && int.TryParse(match.Groups[1].Value, out rating))
         {
             return rating;
         }
-        
-        // Fallback: look for any standalone number followed by /10
-        match = Regex.Match(text, @"(?:^|\s)(\d+)/10", RegexOptions.Multiline);
-        if (match.Success && int.TryParse(match.Groups[1].Value, out rating))
-        {
-            return rating;
-        }
-        
+
         return 0;
     }
     
