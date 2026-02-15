@@ -5,7 +5,15 @@ using LocalOllamaAgent;
 using LocalOllamaAgent.Tools;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using OllamaSharp;
+
+using var loggerFactory = LoggerFactory.Create(builder =>
+{
+    builder
+        .SetMinimumLevel(LogLevel.Information)
+        .AddConsole();
+});
 
 Console.WriteLine("=== Multi-Agent Code Demo (MAF) ===");
 
@@ -52,10 +60,10 @@ Func<bool> compileAudit = () => ToolCallTracker.CompileCalls > compileBaseline;
 Func<bool> executeAudit = () => ToolCallTracker.ExecuteCalls > executeBaseline;
 
 // Create agents with tools
-var codeGeneratorAgent = AgentFactory.CreateCodeGenerator(chatClient);
-var compilerAgent = AgentFactory.CreateCompiler(chatClient);
-var executorAgent = AgentFactory.CreateExecutor(chatClient);
-var validatorAgent = AgentFactory.CreateValidator(chatClient, spec);
+var codeGeneratorAgent = AgentFactory.CreateCodeGenerator(chatClient, loggerFactory);
+var compilerAgent = AgentFactory.CreateCompiler(chatClient, loggerFactory);
+var executorAgent = AgentFactory.CreateExecutor(chatClient, loggerFactory);
+var validatorAgent = AgentFactory.CreateValidator(chatClient, spec, loggerFactory);
 
 // Build and run workflow
 var workflow = AgentWorkflowBuilder
@@ -96,10 +104,15 @@ var agentColors = new Dictionary<string, ConsoleColor>
 
 Console.WriteLine("\n=== Workflow Execution ===\n");
 
+int eventCount = 0;
+try
+{
+
 // Watch workflow execution with improved output handling
 await foreach (WorkflowEvent evt in run.WatchStreamAsync())
 {
-    if (evt is AgentRunUpdateEvent update)
+    eventCount++;
+    if (evt is AgentResponseUpdateEvent update)
     {
         var response = update.AsResponse();
         string? agentName = response.Messages.LastOrDefault()?.AuthorName;
@@ -310,6 +323,31 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         }
         break;
     }
+    else
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"[DEBUG] Unhandled event type: {evt.GetType().Name}");
+        Console.ResetColor();
+    }
+}
+
+if (eventCount == 0)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("WARNING: Workflow produced zero events. Possible causes:");
+    Console.WriteLine("  - Package API change (event types renamed)");
+    Console.WriteLine("  - Model failed to respond (check Ollama container logs)");
+    Console.WriteLine("  - Workflow terminated before any agent ran");
+    Console.ResetColor();
+}
+
+} // end try
+catch (Exception ex)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine($"\nWorkflow error: {ex.GetType().Name}: {ex.Message}");
+    Console.WriteLine(ex.StackTrace);
+    Console.ResetColor();
 }
 
 Console.ForegroundColor = ConsoleColor.White;
@@ -326,14 +364,8 @@ static string? TryGetArtifactDirectory(IReadOnlyCollection<ChatMessage> history)
         return null;
     }
 
-    foreach (var line in compilerMessage.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    {
-        if (line.StartsWith("ARTIFACT_DIR:", StringComparison.OrdinalIgnoreCase))
-        {
-            var path = line.Substring("ARTIFACT_DIR:".Length).Trim();
-            return string.IsNullOrWhiteSpace(path) ? null : path;
-        }
-    }
-
-    return null;
+    return (from line in compilerMessage.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) 
+        where line.StartsWith("ARTIFACT_DIR:", StringComparison.OrdinalIgnoreCase) 
+        select line.Substring("ARTIFACT_DIR:".Length).Trim() into path 
+        select string.IsNullOrWhiteSpace(path) ? null : path).FirstOrDefault();
 }

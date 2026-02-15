@@ -1,6 +1,7 @@
 using LocalOllamaAgent.Tools;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace LocalOllamaAgent;
 
@@ -9,10 +10,11 @@ public static class AgentFactory
     /// <summary>
     /// Creates the Code Generator agent - responsible for generating C# code from specifications.
     /// </summary>
-    public static AIAgent CreateCodeGenerator(IChatClient chatClient)
+    public static ChatClientAgent CreateCodeGenerator(IChatClient chatClient, ILoggerFactory? loggerFactory = null)
     {
         var generationTool = AIFunctionFactory.Create(CodeGenerationTools.GenerateCode);
-        return chatClient.CreateAIAgent(
+        return new ChatClientAgent(
+            chatClient,
             name: "CodeGenerator",
             instructions: @"You are a coding assistant.
 Your goal is to generate C# code using the `GenerateCode` tool.
@@ -32,16 +34,18 @@ Process:
 5. Output CODE_READY on a new line.
 
 Do NOT output JSON. Do NOT explain the tool call. Just use the tool.",
-            tools: [generationTool]);
+            tools: [generationTool],
+            loggerFactory: loggerFactory);
     }
 
     /// <summary>
-    /// Creates the Compiler agent - responsible for compiling code and providing feedback.
+    /// Creates the Compiler agent
     /// </summary>
-     public static AIAgent CreateCompiler(IChatClient chatClient)
+    public static ChatClientAgent CreateCompiler(IChatClient chatClient, ILoggerFactory? loggerFactory = null)
     {
         var compileTool = AIFunctionFactory.Create(CompilationTools.CompileCode);
-        return chatClient.CreateAIAgent(
+        return new ChatClientAgent(
+            chatClient,
             name: "CodeCompiler",
             instructions: @"You are a compiler agent.
 Your goal is to compile code using the `CompileCode` tool.
@@ -68,17 +72,19 @@ Response Rules:
 - Do NOT append commentary before or after the tool output.
 - Your entire reply must match the tool output exactly (same lines, same order). No summaries, notes, or additional sentences are allowed.
 - Do NOT output JSON or any structured wrapper. Do NOT explain the tool call. Just use the tool.",
-            tools: [compileTool]);
+            tools: [compileTool],
+            loggerFactory: loggerFactory);
     }
 
     /// <summary>
-    /// Creates the Executor agent - responsible for running code and reporting results.
+    /// Creates the Executor agent
     /// </summary>
-    public static AIAgent CreateExecutor(IChatClient chatClient)
+    public static ChatClientAgent CreateExecutor(IChatClient chatClient, ILoggerFactory? loggerFactory = null)
     {
         var execTool = AIFunctionFactory.Create(ExecutionTools.ExecuteCode);
-        
-        return chatClient.CreateAIAgent(
+
+        return new ChatClientAgent(
+            chatClient,
             name: "CodeExecutor",
             instructions: @"You are a tool-calling agent. Your ONLY job is to execute the DLL provided by the compiler.
 
@@ -113,16 +119,18 @@ CRITICAL RULES:
 - Your entire reply must be an exact echo of the tool output (plus the required SUCCESS/FAILED wrapper shown above). Do not append explanations or advice.
 
 Do NOT output JSON. Do NOT explain the tool call. Just use the tool.",
-            tools: [execTool]);
+            tools: [execTool],
+            loggerFactory: loggerFactory);
     }
 
     /// <summary>
-    /// Creates the Validator agent - responsible for checking if the output matches the spec.
+    /// Creates the Validator agent
     /// </summary>
-        public static AIAgent CreateValidator(IChatClient chatClient, string specification)
+    public static ChatClientAgent CreateValidator(IChatClient chatClient, string specification, ILoggerFactory? loggerFactory = null)
     {
-                string normalizedSpec = string.IsNullOrWhiteSpace(specification) ? "No specification provided." : specification;
-        return chatClient.CreateAIAgent(
+        string normalizedSpec = string.IsNullOrWhiteSpace(specification) ? "No specification provided." : specification;
+        return new ChatClientAgent(
+            chatClient,
             name: "CodeValidator",
             instructions: $@"You are a Quality Assurance agent.
 Original user specification:
@@ -155,6 +163,7 @@ CRITICAL:
 - Reject any response that contradicts the specification or lacks verified evidence.
 - Reject if the required tool outputs are missing, incomplete, or altered.
 - Be strict. Do not assume success without proof. If uncertain, reject and request a retry.",
-            tools: []);
+            tools: [],
+            loggerFactory: loggerFactory);
     }
 }
