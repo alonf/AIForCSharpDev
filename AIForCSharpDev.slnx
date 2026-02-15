@@ -2,6 +2,7 @@
   <Project Path="ComputerUsageAgent/ComputerUsageAgent.csproj" />
   <Project Path="EventLogMcp/EventLogMcp.csproj" />
   <Project Path="HelloAgent/HelloAgent.csproj" />
+  <Project Path="JokeA2AClientDemo/JokeA2AClientDemo.csproj" />
   <Project Path="JokeAgentsDemo/JokeAgentsDemo.csproj" />
   <Project Path="LocalOllamaAgent/LocalOllamaAgent.csproj" />
 </Solution>

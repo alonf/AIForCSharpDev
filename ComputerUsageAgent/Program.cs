@@ -6,7 +6,6 @@ using ComputerUsageAgent.Visualization;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Client;
-using OpenAI;
 using Spectre.Console;
 
 // Display welcome banner
