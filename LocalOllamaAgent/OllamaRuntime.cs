@@ -6,7 +6,7 @@ public static class OllamaRuntime
 {
     public const string ContainerName = "ollama";
     public const string Image = "ollama/ollama:latest";
-    public const string DefaultModel = "qwen2.5-coder:14b-instruct-q4_K_M";//"qwen2.5-coder:32b-instruct-q4_K_M"; // "llama3.1:8b";
+    public const string DefaultModel = "mistral-small3.2:24b"; //"qwen2.5-coder:14b-instruct-q4_K_M";//"qwen2.5-coder:32b-instruct-q4_K_M"; // "llama3.1:8b";
     public const int Port = 11434;
 
     public static string Model =>
