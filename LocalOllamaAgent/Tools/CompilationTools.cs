@@ -16,7 +16,7 @@ public static class CompilationTools
     private const string RunMetadataFileName = "run-metadata.json";
     private const string AppModelConsole = "CONSOLE";
     private const string AppModelGui = "GUI";
-    private static readonly object CompileCacheLock = new();
+    private static readonly Lock CompileCacheLock = new();
     private static string? _lastCompileSignature;
     private static string? _lastCompileResult;
     private static DateTime _lastCompileUtc;

@@ -4,7 +4,7 @@ using Azure.AI.OpenAI;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI;
+
 // Azure OpenAI SDK
 // Azure Identity SDK
 // MAF (Microsoft Agent Framework)
