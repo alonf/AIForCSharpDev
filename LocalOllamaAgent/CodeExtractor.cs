@@ -16,7 +16,44 @@ public static class CodeExtractor
             return string.Empty;
         }
 
-        string bestBlock = string.Empty;
+        var blocks = ParseFenceBlocks(text);
+        if (blocks.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var csharpBlock = blocks.LastOrDefault(block => IsCSharpLanguage(block.Language));
+        if (!string.IsNullOrWhiteSpace(csharpBlock.Content))
+        {
+            return csharpBlock.Content.Trim();
+        }
+
+        var heuristicBlock = blocks.FirstOrDefault(block => LooksLikeCSharp(block.Content));
+        if (!string.IsNullOrWhiteSpace(heuristicBlock.Content))
+        {
+            return heuristicBlock.Content.Trim();
+        }
+
+        string bestNonJson = blocks
+            .Where(block => !IsJsonLanguage(block.Language))
+            .OrderByDescending(block => block.Content.Length)
+            .Select(block => block.Content)
+            .FirstOrDefault() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(bestNonJson))
+        {
+            return bestNonJson.Trim();
+        }
+
+        return blocks
+            .OrderByDescending(block => block.Content.Length)
+            .Select(block => block.Content)
+            .FirstOrDefault()?
+            .Trim() ?? string.Empty;
+    }
+
+    private static List<FenceBlock> ParseFenceBlocks(string text)
+    {
+        var blocks = new List<FenceBlock>();
         int searchIndex = 0;
 
         while (true)
@@ -33,30 +70,32 @@ public static class CodeExtractor
                 break;
             }
 
-            var block = text.Substring(startFence + 3, endFence - startFence - 3);
-            var cleaned = NormalizeBlock(block);
-            if (cleaned.Length > bestBlock.Length)
+            var rawBlock = text.Substring(startFence + 3, endFence - startFence - 3);
+            var (language, content) = NormalizeBlock(rawBlock);
+            if (!string.IsNullOrWhiteSpace(content))
             {
-                bestBlock = cleaned;
+                blocks.Add(new FenceBlock(language, content));
             }
 
             searchIndex = endFence + 3;
         }
 
-        return bestBlock.Trim();
+        return blocks;
     }
 
-    private static string NormalizeBlock(string block)
+    private static (string Language, string Content) NormalizeBlock(string block)
     {
         block = block.Replace("\r\n", "\n").Replace('\r', '\n');
         var lines = block.Split('\n');
         int startIndex = 0;
+        string language = string.Empty;
 
         if (lines.Length > 0)
         {
             string firstLine = lines[0].Trim();
             if (IsLanguageIdentifier(firstLine))
             {
+                language = firstLine;
                 startIndex = 1;
             }
         }
@@ -72,7 +111,7 @@ public static class CodeExtractor
             cleaned.Add(lines[i]);
         }
 
-        return string.Join('\n', cleaned).Trim();
+        return (language, string.Join('\n', cleaned).Trim());
     }
 
     private static bool IsLanguageIdentifier(string value)
@@ -97,4 +136,28 @@ public static class CodeExtractor
 
         return true;
     }
+
+    private static bool IsCSharpLanguage(string language)
+    {
+        return language.Equals("csharp", StringComparison.OrdinalIgnoreCase) ||
+               language.Equals("cs", StringComparison.OrdinalIgnoreCase) ||
+               language.Equals("c#", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsJsonLanguage(string language) =>
+        language.Equals("json", StringComparison.OrdinalIgnoreCase);
+
+    private static bool LooksLikeCSharp(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        return content.Contains("class ", StringComparison.Ordinal) ||
+               content.Contains("static void Main", StringComparison.Ordinal) ||
+               content.Contains("using System", StringComparison.Ordinal);
+    }
+
+    private readonly record struct FenceBlock(string Language, string Content);
 }

@@ -27,10 +27,10 @@ public static class JokeWorkflowAgentFactory
         // Wrap it in a ChatClientAgent for AG-UI compatibility
         return new ChatClientAgent(
             workflowChatClient,
-            new ChatClientAgentOptions("Creates jokes using iterative group chat workflow")
+            new ChatClientAgentOptions
             {
                 Name = "JokeWorkflow",
-                Description = "Joke creation workflow with quality gate (AG-UI enabled)"
+                Description = "Creates jokes using iterative group chat workflow"
             }
         );
     }
@@ -79,9 +79,9 @@ internal class JokeWorkflowChatClient : IChatClient
         List<ChatMessage> results = new();
         await foreach (WorkflowEvent evt in run.WatchStreamAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (evt is AgentRunUpdateEvent update)
+            if (evt is AgentResponseEvent update)
             {
-                var response = update.AsResponse();
+                var response = update.Response;
                 results.AddRange(response.Messages);
             }
             else if (evt is WorkflowOutputEvent output)
@@ -128,13 +128,11 @@ internal class JokeWorkflowChatClient : IChatClient
 
         await foreach (WorkflowEvent evt in run.WatchStreamAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (evt is AgentRunUpdateEvent update)
+            if (evt is AgentResponseUpdateEvent update)
             {
-                var response = update.AsResponse();
-                var msg = response.Messages.LastOrDefault();
-                var chunk = response.Text; // passthrough text chunk from workflow
+                var chunk = update.Update.Text;
+                var author = update.Update.AuthorName;
 
-                var author = msg?.AuthorName;
                 if (!string.IsNullOrEmpty(author) && author != currentAuthor)
                 {
                     if (author == "JokeCreator")
@@ -182,9 +180,15 @@ internal class JokeWorkflowChatClient : IChatClient
 
                 if (!string.IsNullOrEmpty(finalCreator?.Text))
                 {
+                    var qualityPassed = finalRating >= 8;
+                    var statusEmoji = qualityPassed ? "\u2705" : "\u26A0\uFE0F";
+                    var statusText = qualityPassed
+                        ? $"Approved after {Math.Max(iteration, 1)} iteration(s)"
+                        : $"Best result after {Math.Max(iteration, 1)} iteration(s) (quality gate requires 8/10)";
+
                     yield return new ChatResponseUpdate
                     {
-                        Contents = [new TextContent($"\n\n---\n\n\U0001F389 FINAL APPROVED JOKE:\n{finalCreator!.Text}\n\n\u2705 Approved after {Math.Max(iteration, 1)} iteration(s)\n\u2B50 Final Rating: {finalRating}/10\n")],
+                        Contents = [new TextContent($"\n\n---\n\n\U0001F389 FINAL RESULT:\n{finalCreator!.Text}\n\n{statusEmoji} {statusText}\n\u2B50 Final Rating: {finalRating}/10\n")],
                         Role = ChatRole.Assistant
                     };
                 }

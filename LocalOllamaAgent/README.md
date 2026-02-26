@@ -14,9 +14,9 @@ Multi-agent code generation demo for the Microsoft Agent Framework (MAF). The wo
 
 | Agent | Role | Tools | Must Do |
 |-------|------|-------|---------|
-| `CodeGenerator` | Drafts the full C# console app. | `GenerateCode(spec)` template helper. | Produce a single ```csharp block followed by `CODE_READY`. |
-| `CodeCompiler` | Compiles the generator output. | `CompileCode(source)`; registers tool call counts. | Echo the tool output verbatim (`COMPILED_SUCCESS`, `DLL_PATH`, `ARTIFACT_DIR`, or `COMPILATION_FAILED`). |
-| `CodeExecutor` | Runs the produced DLL. | `ExecuteCode(dllPath)`; enforces configured timeout. | Echo the tool output verbatim and include the raw program stdout/stderr. |
+| `CodeGenerator` | Drafts the full C# app plus build metadata. | `GenerateCode(spec)` template helper. | Produce a ` ```json ` compile manifest, a ` ```csharp ` program, then `CODE_READY`. |
+| `CodeCompiler` | Compiles the generator output. | `CompileCode(compileInput)`; registers tool call counts. | Pass full generator message to tool and echo output verbatim (`COMPILED_SUCCESS`, `DLL_PATH`, `ARTIFACT_DIR`, `APP_MODEL`, or `COMPILATION_FAILED`). |
+| `CodeExecutor` | Runs the produced DLL. | `ExecuteCode(dllPath, appModelHint?)`; enforces configured timeout. | Echo the tool output verbatim and include execution evidence (`stdout` for console or UI smoke markers for GUI). |
 | `CodeValidator` | Confirms the execution satisfies the specification. | Reasoning only. | Reject results if compile/execute tool output is missing or altered, or if the output does not match the spec. |
 
 All tools are standard `[Description]`-decorated static methods, instantiated for agents via `AIFunctionFactory.Create(...)`.
@@ -32,11 +32,11 @@ CodeGenerator
   |
   v
 CodeCompiler
-  Tool: CompileCode(source)
+  Tool: CompileCode(compileInput)
   |
   v
 CodeExecutor
-  Tool: ExecuteCode(dllPath)
+  Tool: ExecuteCode(dllPath, appModelHint?)
   |
   v
 CodeValidator
@@ -48,6 +48,43 @@ Validation Outcome (SUCCESS / retry)
   |
    If VALIDATION_FAILED, feedback loops back to CodeGenerator
 ```
+
+## Compile Manifest Schema
+
+The generator emits a JSON manifest before the C# block so the compiler can add project settings and dependencies:
+
+```json
+{
+  "project": {
+    "targetFramework": "net10.0",
+    "outputType": "Exe",
+    "useWindowsForms": false,
+    "useWpf": false
+  },
+  "packageReferences": [
+    { "id": "Package.Name", "version": "1.2.3" }
+  ],
+  "frameworkReferences": [],
+  "references": []
+}
+```
+
+`CompileCode` still accepts plain C# for backward compatibility.
+
+## UI Workflow Semantics
+
+- `CompileCode` now emits `APP_MODEL: GUI|CONSOLE` and stores run metadata in the artifact directory.
+- `ExecuteCode` reads that app model and applies mode-specific rules:
+  - Console apps: timeout remains a failure unless interactive fallback semantics apply.
+  - GUI apps: if the app stays alive until timeout without runtime errors, execution is treated as a successful UI smoke run.
+- GUI smoke success output includes markers used by the validator:
+  - `APP_MODEL: GUI`
+  - `UI_SESSION: STARTED|COMPLETED`
+  - `UI_VALIDATION: GUI_SMOKE_PASS`
+  - `RESULT_SUMMARY: ...`
+- During workflow execution of GUI apps, executor sets:
+  - `MAF_UI_TEST_MODE=1`
+  - `MAF_APP_EXECUTION_MODE=workflow`
 
 - `CodeWorkflowManager` enforces the turn order and audits that `CompileCode` and `ExecuteCode` were actually invoked before allowing `VALIDATION_SUCCESS`.
 - `ToolCallTracker` increments counters inside each tool so runs can be audited after completion.
@@ -65,7 +102,7 @@ dotnet run --project LocalOllamaAgent
 ```
 
 1. Choose **Local** (default) to run with the bundled Ollama container or **Cloud** to use the hardcoded Azure OpenAI deployment.
-2. Supply a plain-English console app specification when prompted—for example, `print Fibonacci numbers up to 100`.
+2. Supply a plain-English app specification when prompted—for example, `print Fibonacci numbers up to 100` or `build a WinForms fractal viewer`.
 3. Watch the color-coded transcript as the agents iterate, call tools, and stream output in real time.
 
 At the end of a successful run the console prints:
@@ -80,6 +117,7 @@ At the end of a successful run the console prints:
 - Optional environment variables:
   - `OLLAMA_MODEL` (defaults to `llama3.1:8b`)
   - `EXECUTION_TIMEOUT_MS` (defaults to `8000` ms)
+  - `ALLOW_INTERACTIVE_FALLBACK` (`1`/`true` enables console-attached fallback for console-only apps)
 
 `OllamaRuntime` will create or reuse a container named `ollama`, pull the target model if missing, and wait for the HTTP endpoint to become available before the agents start.
 

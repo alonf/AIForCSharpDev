@@ -6,7 +6,7 @@ public static class OllamaRuntime
 {
     public const string ContainerName = "ollama";
     public const string Image = "ollama/ollama:latest";
-    public const string DefaultModel = "llama3.1:8b";
+    public const string DefaultModel = "mistral-small3.2:24b"; //"qwen2.5-coder:14b-instruct-q4_K_M";//"qwen2.5-coder:32b-instruct-q4_K_M"; // "llama3.1:8b";
     public const int Port = 11434;
 
     public static string Model =>
@@ -37,7 +37,8 @@ public static class OllamaRuntime
 
         // Wait for Ollama API to be ready
         Console.WriteLine("Waiting for Ollama API to be ready...");
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        using var http = new HttpClient();
+        http.Timeout = TimeSpan.FromSeconds(5);
         for (int i = 0; i < 30; i++)
         {
             try
@@ -49,7 +50,11 @@ public static class OllamaRuntime
                     break;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  Waiting... ({ex.GetType().Name}: {ex.Message})");
+            }
+
             await Task.Delay(500);
         }
 
@@ -100,7 +105,8 @@ public static class OllamaRuntime
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var http = new HttpClient();
+            http.Timeout = TimeSpan.FromSeconds(10);
             var response = await http.GetAsync($"http://localhost:{Port}/api/tags");
             if (response.IsSuccessStatusCode)
             {
@@ -109,7 +115,11 @@ public static class OllamaRuntime
                 return content.Contains(modelName, StringComparison.OrdinalIgnoreCase);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: Could not check model availability: {ex.Message}");
+        }
+
         return false;
     }
 
